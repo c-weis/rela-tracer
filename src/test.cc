@@ -15,11 +15,11 @@ int main() {
   Scene scene;
 
   // Basic settings
-  const int width = 200;
-  const int height = 200;
-  const int rays_per_pixel = 100;
+  const int width = 50;
+  const int height = 50;
+  const int rays_per_pixel = 10;
   const int depth = 3;
-  const std::vector<int> scatter_ray_counts = {50, 10, 1};
+  const std::vector<int> scatter_ray_counts = {5, 5, 1};
 
   // Camera
   Vec4 cam_pos = kZero4;
