@@ -1,41 +1,20 @@
 // Copyright 2023 Christoph Weis
-#pragma once
+#ifndef TRACER_H_INCLUDED
+#define TRACER_H_INCLUDED
 
 #include <array>
+#include <iostream>
 #include <optional>
 #include <random>
 #include <string>
 #include <vector>
 
+#include "colors.h"
 #include "materials.h"
 #include "math.h"
 #include "scene.h"
 
 enum RenderMode { kConsole, kOutputFile, kLive };
-
-/*
-  SCATTER DATA
-*/
-
-// Scatter data naturally assembles into a rooted tree:
-// We have the final ray hitting the camera - the root node.
-// At each scatter point, the pre-scattered rays hit the
-// point of scattering and combine into the scattered ray.
-// (We traverse the scattter tree backwards in time.)
-struct ScatterNode {
-  // Outgoing ray velocity in standard frame
-  Vec3 ray_vel;
-  // Outgoing ray velocity in restframe of parent
-  Vec3 ray_vel_in_parent_rf;
-  // Hit object, position, normal, scattered ray in obj restframe
-  HitRecord hit;
-  // Children (ie. pre-scattered rays)
-  std::vector<ScatterNode> children;
-};
-typedef std::optional<ScatterNode> OptionalScatterNode;
-
-// Return maximum depth of scatter tree
-int scatter_depth(const ScatterNode &root, int start_depth = 0);
 
 /*
   TRACER CLASS
@@ -46,7 +25,9 @@ class Tracer {
   explicit Tracer(const Scene &scene)
       : scene_(scene), r_gen_(new std::mt19937(42)) {}
 
-  bool RenderImage(int rays_per_pixel = 5, int depth = 3, std::vector<int> scatter_ray_counts = {5}, int camera_index = 0,
+  bool RenderImage(int rays_per_pixel = 5, int depth = 3,
+                   std::vector<int> scatter_ray_counts = {5},
+                   int camera_index = 0,
                    RenderMode render_mode = RenderMode::kConsole,
                    std::string filename = "") const;
 
@@ -55,13 +36,26 @@ class Tracer {
 
   std::mt19937 *r_gen_;
 
-  ColorData TraceRay(const Line &r, int depth, std::vector<int>::const_iterator scatter_ray_count) const;
+  ColorData ColorInStandardFrame(
+      const Line &ray, int depth,
+      std::vector<int>::const_iterator scatter_ray_count) const;
 
-  ColorData ColorInStandardFrame(ScatterNode) const;
+  ColorData TraceRay(const Line &r, int depth,
+                     std::vector<int>::const_iterator scatter_ray_count,
+                     Vec3 camera_vel) const;
 
-  OptionalScatterNode RecursiveTraceRay(const Line &ray, int depth,
-                                        std::vector<int>::const_iterator scatter_ray_count,
-                                        Line parent_restframe_worldlline) const;
+  std::vector<ScatterData> InverseScatter(HitRecord hit, int scattered_rays) const;
 
-  std::vector<Vec3> InverseScatter(HitRecord hit, int scattered_rays) const;
+  bool SetupOutput(int width, int height, RenderMode render_mode,
+                   std::ofstream &ofs, std::string filename) const;
+
+  float EstimateRescaleFactor(
+      LineList *image_rays, int depth,
+      std::vector<int>::const_iterator scatter_ray_count_iterator,
+      Vec3 camera_vel) const;
+
+  void OutputPixel(RGBData pixel_RGB, int pixel_index, int width, int height,
+                   RenderMode render_mode, std::ofstream &ofs) const;
 };
+
+#endif

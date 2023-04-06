@@ -1,5 +1,6 @@
 // Copyright 2023 Christoph Weis
-#pragma once
+#ifndef MATH_H_INCLUDED
+#define MATH_H_INCLUDED
 
 #include <iostream>
 #include <optional>
@@ -27,8 +28,6 @@ struct Vec3 {
   float Dot3(const Vec3 &) const;
   float CosAngleTo(const Vec3 &) const;
   Vec3 Cross(const Vec3 &) const;
-  // reflect in plane given the normal vector to the plane
-  Vec3 Reflected(const Vec3 &normal) const;
 
   void NormalizeNonzero();
   bool Normalize();
@@ -122,3 +121,5 @@ struct ReferenceFrameHit {
       : pos(_pos), normal(_normal), scattered(_scattered), outside(_outside) {}
 };
 typedef std::optional<ReferenceFrameHit> OptionalReferenceFrameHit;
+
+#endif

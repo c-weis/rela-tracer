@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <iostream>
 
+#include "include/colors.h"
 #include "include/math.h"
 #include "include/scene.h"
 #include "include/tracer.h"
@@ -11,79 +12,169 @@ Vec3 x(1, 0, 0);
 Vec3 y(0, 1, 0);
 Vec3 z(0, 0, 1);
 
-int main() {
+Scene ball_in_box(int width, int height) {
+  /*
+    BALL IN BOX
+    */
   Scene scene;
 
-  // Basic settings
-  const int width = 50;
-  const int height = 50;
-  const int rays_per_pixel = 10;
-  const int depth = 3;
-  const std::vector<int> scatter_ray_counts = {5, 5, 1};
-
   // Camera
-  Vec4 cam_pos = kZero4;
-  Vec3 screen_centre = cam_pos.r + y;
-  Vec3 right_edge = screen_centre + z;
-  Camera cam(cam_pos, screen_centre, right_edge, width, height);
+  Vec3 cam_pos = kZero3;
+  Vec3 forward = -z;
+  Vec3 right = x;
+  Vec3 up = Cross(right, forward);
+  Vec3 backward = -forward;
+  Vec3 left = -right;
+  Vec3 down = -up;
+
+  Camera cam(cam_pos, forward, right, width, height);
   scene.AddCamera(cam);
 
   // Materials
-  LambertianScatter lambert;
-  Material bright_red_light(nullptr, &kBrightRed);
-  Material dim_green_light(nullptr, &kDimGreen);
-  Material bright_blue_light(nullptr, &kBrightBlue);
-  Material dim_blue_light(nullptr, &kDimBlue);
-  //Material bright_red_light(&lambert, &kBrightRed);
-  //Material dim_green_light(&lambert, &kDimGreen);
-  //Material bright_blue_light(&lambert, &kBrightBlue);
-  //Material dim_blue_light(&lambert, &kDimBlue);
-  Material lambertian(&lambert, nullptr);
-  Material mirror(new Mirror(), nullptr); 
+  Material bright_red_light = kBrightRed;
+  Component bright_green_light = kBrightGreen;
+  Component bright_blue_light = kBrightBlue;
+  Component dim_blue_light = kDimBlue;
+  Component lambertian = Lambertian(0.7f);
+  Component mirror = kMirror;
+  Component glass = kGlass;
 
   // Auxiliary screen & direction variables
   float aspect = static_cast<float>(width) / height;
-  Vec3 right = right_edge - screen_centre;
-  Vec3 front = screen_centre - cam_pos.r;
-  Vec3 top = (right ^ front) / aspect;
+  Vec3 screen_top = (right ^ forward) / aspect;
 
   // Add objects
   Vec3 sphere_vel(0, 0, 0);
-  Vec3 sphere_O = 2 * y;
+  Vec3 sphere_O = 2 * forward;
   float sphere_rad = 1.0f;
-  //Sphere mirror_sphere(&mirror, sphere_O, sphere_rad, 0, sphere_vel);
-  //scene.Add(mirror_sphere);
-  Sphere lambert_sphere(&lambertian, sphere_O, sphere_rad, 0, sphere_vel);
-  scene.Add(lambert_sphere);
+  Sphere sphere(glass, sphere_O, sphere_rad, 0, sphere_vel);
+  scene.Add(sphere);
 
-  Vec3 light_sphere_O = cam_pos.r + 0.5 * right + 1.5f * top;
-  float light_sphere_rad = 0.3f;
-  Sphere light_sphere(&bright_blue_light, light_sphere_O, light_sphere_rad);
-  scene.Add(light_sphere);
-  // Sphere small_mirror_sphere(&mirror, light_sphere_O, light_sphere_rad);
-  // scene.Add(small_mirror_sphere);
+  Vec3 light_sphere_O = cam_pos + 0.5 * right + 1.5f * screen_top;
+  float light_sphere_rad = 0.6f;
+  Sphere light_sphere(bright_blue_light, light_sphere_O, light_sphere_rad);
+  // scene.Add(light_sphere);
+  //  Sphere small_mirror_sphere(&mirror, light_sphere_O, light_sphere_rad);
+  //  scene.Add(small_mirror_sphere);
 
-  Vec3 box_corner_O = sphere_O - 3 * (x + y + z);
-  Vec3 box_corner_A = box_corner_O + 6 * x;
-  Vec3 box_corner_B = box_corner_O + 6 * y;
-  Vec3 box_corner_C = box_corner_O + 6 * z;
-  scene.AddBox(&lambertian, box_corner_O, box_corner_A, box_corner_B,
-               box_corner_C);
+  Vec3 FDL = sphere_O - 3 * (forward + up + right);
+  Vec3 BDL = FDL + 6 * forward;
+  Vec3 FUL = FDL + 6 * up;
+  Vec3 FDR = FDL + 6 * right;
+  Box surrounding_box(lambertian, FDL, BDL, FUL, FDR);
+  surrounding_box.back.SetMaterial(mirror);
+  surrounding_box.down.SetMaterial(mirror);
+  surrounding_box.right.SetMaterial(glass);
+  surrounding_box.up.SetMaterial(bright_blue_light);
+  surrounding_box.left.SetMaterial(bright_red_light);
+  surrounding_box.front.SetMaterial(bright_green_light);
+  scene.Add(surrounding_box);
 
-  // Vec3 plane_O = sphere_O - 2 * x;
-  // Plane p(&gray_light, plane_O, plane_O + x, plane_O + y);
-  // scene.Add(p);
+  return scene;
+}
 
-  // Line light_triangle_line(Vec4(0, screen_centre + 0.5 * right + 0.5 * top),
-  // kZero3); Triangle t(&white_light, light_triangle_line, 0.5 * right, 0.5 *
-  // top); scene.Add(t);
+Scene moving_sphere(int width, int height) {
+  /*
+    MOVING SPHERE
+  */
+  Scene scene;
+
+  // Camera
+  Vec3 cam_pos = kZero3;
+  Vec3 forward = -z;
+  Vec3 right = x;
+  Vec3 up = Cross(right, forward);
+  Vec3 backward = -forward;
+  Vec3 left = -right;
+  Vec3 down = -up;
+
+  Camera cam(cam_pos, forward, right, width, height);
+  scene.AddCamera(cam);
+
+  Vec3 skylight_direction = down.NormalizedNonzero();
+  scene.SetSkylight(kBrightYellow, skylight_direction);
+
+  // Materials
+  Material clean_metal = Metal(0.9f);
+  Material fuzzy_metal = Metal(0.8f, 0.4f);
+  Material lambertian = Lambertian(0.7f);
+  Material bright_green_light = kBrightGreen;
+  Material mirror = kMirror;
+  Material glass = kGlass;
+
+  // Add objects
+  Vec3 sphere_vel = 0.3 * right;
+  Vec3 sphere_O = 3 * forward;
+  float sphere_rad = 1.0f;
+  Sphere sphere(glass, sphere_O, sphere_rad, 0, sphere_vel);
+  scene.Add(sphere);
+
+  Vec3 plane_O = sphere_O + down * 3 * sphere_rad;
+  Vec3 plane_A = plane_O + right;
+  Vec3 plane_B = plane_O + forward;
+  Plane plane(fuzzy_metal, plane_O, plane_A, plane_B);
+  scene.Add(plane);
+
+  float mirror_side = 8.0f;
+  Vec3 mirror_O = 10 * forward - mirror_side / 2.0f * (up + right + backward);
+  Vec3 mirror_A = mirror_O + mirror_side * (right + backward);
+  Vec3 mirror_B = mirror_O + mirror_side * up;
+  Parallelogram mirror_plane(clean_metal, mirror_O, mirror_A, mirror_B);
+  scene.Add(mirror_plane);
+
+  return scene;
+}
+
+Scene glass_ball(int width, int height) {
+  Scene scene;
+
+  Vec3 forward = y;
+  Vec3 right = x;
+  Vec3 up = right ^ forward;
+  Camera cam(kZero3 + up, forward, right, width, height);
+  scene.AddCamera(cam);
+
+  Material lambertian = Lambertian(0.7f);
+  Material clean_metal = Metal(0.7f);
+  Material glass = kGlass;
+
+  Material bright_green_light = kBrightGreen;
+  Material bright_blue_light = kBrightBlue;
+
+  scene.SetSkylight(kBrightYellow, -up);
+
+  Vec3 O1 = kZero3;
+  scene.Add(Plane(0.9 * lambertian + 0.1 * kMirror, O1, O1 + right, O1 + forward));
+
+  float r2 = 0.7f;
+  Vec3 O2 = O1 + 2 * forward + r2 * up;
+  scene.Add(Sphere(glass, O2, r2));
+
+  float r3 = 0.5f;
+  Vec3 O3 = O2 + (r2 + r3) * right - r2 * up + r3 * up + r3/2.0f * forward;
+  scene.Add(Sphere(bright_green_light, O3, r3));
+
+  float r4 = 0.5f;
+  Vec3 O4 = O2 - (r2 + r4) * right - r2 * up + r4 * up;
+  scene.Add(Sphere(bright_blue_light, O4, r4));
+
+  return scene;
+}
+
+int main(int argc, char *argv[]) {
+  // Basic settings
+  const int width = 500;
+  const int height = 500;
+  const int rays_per_pixel = 30;
+  const int depth = 5;
+  const std::vector<int> scatter_ray_counts = {10, 5, 1};
+
+  Scene scene = glass_ball(width, height);
 
   // Raytracer
   Tracer tracey(scene);
   tracey.RenderImage(rays_per_pixel, depth, scatter_ray_counts, 0,
                      RenderMode::kOutputFile, "test");
-  // tracey.RenderImage(rays_per_pixel, depth, scatter_ray_counts, 0,
-  // RenderMode::kConsole);
 
   return EXIT_SUCCESS;
 }

@@ -65,12 +65,6 @@ Vec3 Vec3::Cross(const Vec3 &other) const {
               x * other.y - y * other.x);
 }
 
-// Reflects vector in plane given the normal vector
-// TODO(c): normalise `normal`?
-Vec3 Vec3::Reflected(const Vec3 &normal) const {
-  return *this - 2 * this->Dot3(normal) * normal;
-}
-
 Vec3 Cross(const Vec3 &left, const Vec3 &right) { return left.Cross(right); }
 
 Vec3 NormalTo(const Vec3 &left, const Vec3 &right) {

@@ -1,170 +1,174 @@
 // Copyright 2023 Christoph Weis
-#pragma once
+#ifndef MATERIALS_H_INCLUDED
+#define MATERIALS_H_INCLUDED
 
-#include <cmath>
-#include <functional>
+#include <algorithm>
 #include <memory>
 #include <random>
 #include <vector>
 
+#include "colors.h"
 #include "math.h"
 
 const uint kStandardSeed = 42;
 
-/*
-  COLOR STRUCTURES
-*/
-struct RGBData {
-  int R, G, B;
-  static RGBData gray(int shade);
+struct ScatterData {
+  // struct for a weighted light ray,
+  // plus an auxiliary material flag
+  // to be used for computation of
+  // scattered color
+  ScatterData(Vec3 vel_, float weight_ = 1.0f, int material_data_ = 0)
+      : vel(vel_), weight(weight_), material_data(material_data_) {}
+  Vec3 vel;
+  float weight;
+  int material_data;
 };
 
-struct rgbData {
-  float r, g, b;
+inline ScatterData operator*(const ScatterData &s_data, float factor) {
+  return ScatterData(s_data.vel, s_data.weight * factor, s_data.material_data);
+}
 
-  RGBData ToRGB(float rescale_factor = 255.0f, int max = 255) const;
-};
-rgbData operator*(const rgbData &, float);
-rgbData operator*(float, const rgbData &);
-rgbData operator/(const rgbData &, float);
+class Component {
+ public:
+  virtual std::vector<ScatterData> InverseScatter(
+      const ReferenceFrameHit &rf_hit, int scatter_rays,
+      std::mt19937 *random_number_generator) const {
+    return {};
+  }
 
-struct XYZData {
-  float X, Y, Z;
-  // compute XYZ from wavelength
-  XYZData(float _X, float _Y, float _Z) : X(_X), Y(_Y), Z(_Z) {}
-  XYZData(float lambda);
+  virtual ColorData ScatteredColor(const ColorData &pre_scatter_color,
+                                   const ReferenceFrameHit &rf_hit,
+                                   const Vec3 &pre_scattered,
+                                   int material_data = 0) const {
+    return kBlack;
+  }
 
-  rgbData To_rgb() const;
-};
-
-XYZData operator+(const XYZData &, const XYZData &);
-XYZData operator*(const XYZData &, float);
-XYZData operator*(float, const XYZData &);
-XYZData operator/(const XYZData &, float);
-
-struct LightRay {
-  float brightness;
-  Vec4 k;  // wave 4-vector (\omega, kx, ky, kz)
-
-  LightRay(float photons_, Vec4 k_) : brightness(photons_), k(k_) {}
-  LightRay &operator*=(float);
-  LightRay &operator/=(float);
-  // The wave vector transformed like any 4-vector,
-  // while `brightness` should transform like 1/time.
-  // (Geometric effects are already accounted for by
-  // the statistical model we use to detect incoming light,
-  // but the number of photons / second emitted by a light
-  // source is dependent on the observer frame.)
-  LightRay TransformedToFrame(const Vec3 &) const;
-  LightRay TransformedFromFrame(const Vec3 &) const;
-  LightRay &TransformToFrame(const Vec3 &);
-  LightRay &TransformFromFrame(const Vec3 &);
-};
-LightRay operator*(const LightRay &, float);
-LightRay operator*(float, const LightRay &);
-
-struct ColorData {
-  std::vector<LightRay> light_rays;
-
-  explicit ColorData(std::vector<LightRay> _light_rays = {})
-      : light_rays(_light_rays) {}
-
-  ColorData &operator+=(const ColorData &);
-  ColorData &operator*=(float);
-  ColorData &operator/=(float);
-
-  ColorData &TransformToFrame(const Vec3 &);
-  ColorData &TransformFromFrame(const Vec3 &);
-
-  rgbData To_rgb() const;
-  RGBData ToRGB() const;
+  virtual ColorData EmittedColor(const ReferenceFrameHit &rf_hit) const {
+    return kBlack;
+  }
 };
 
-// Method culled because it is inefficient
-// ColorData operator+(const ColorData &, const ColorData &);
-ColorData operator*(const ColorData &, float);
-ColorData operator*(float, const ColorData &);
-ColorData operator/(const ColorData &, float);
+struct WeightedComponent {
+  template <class ComponentType>
+  WeightedComponent(const std::shared_ptr<ComponentType> &comp_,
+                    float weight_ = 1.0f)
+      : comp(comp_), weight(weight_) {}
 
-const ColorData kBlack;
-// const ColorData kWhite(1.0f);
+  template <class ComponentType>
+  WeightedComponent(const ComponentType &comp_, float weight_ = 1.0f)
+      : WeightedComponent(std::make_shared<ComponentType>(comp_), weight_) {}
+
+  std::shared_ptr<Component> comp;
+  float weight;
+};
 
 /*
-  MATERIALS SECTION
+inline WeightedComponent operator*(const WeightedComponent &w_comp,
+                                   float factor) {
+  return WeightedComponent(w_comp.comp, w_comp.weight * factor);
+}
+
+inline WeightedComponent operator*(float factor,
+                                   const WeightedComponent &w_comp) {
+  return factor * w_comp;
+}
 */
-class Scatterer {
+
+typedef std::vector<WeightedComponent> ComponentList;
+class Material : public Component {
  public:
-  virtual std::vector<Vec3> InverseScatter(
-      Vec3 scattered_ray, Vec3 object_normal, int max_number_of_rays,
-      std::mt19937 *random_number_generator) const = 0;
+  Material(WeightedComponent w_comp) : components_({w_comp}) {}
 
-  virtual const ColorData ScatteredColor(
-      const ReferenceFrameHit &rf_hit, const Vec3 &pre_scattered,
-      const ColorData &pre_scatter_color) const = 0;
+  template <class ComponentType>
+  Material(const ComponentType &comp) : Material(WeightedComponent(comp)) {}
 
- private:
-  ColorData color_;
-};
+  template <class... ComponentTypes>
+  Material(WeightedComponent w_comp, ComponentTypes... more_comps)
+      : Material(w_comp) {
+    Add(more_comps...);
+  }
 
-class Emitter {
- public:
-  virtual const ColorData EmittedColor(
-      const ReferenceFrameHit &rf_hit) const = 0;
-};
+  template <class ComponentType, class... ComponentTypes>
+  Material(ComponentType comp1, ComponentTypes... more_comps)
+      : Material(WeightedComponent(comp1)) {
+    Add(more_comps...);
+  }
 
-class Material {
- public:
-  template <class ScatterType, class EmitterType>
-  Material(const ScatterType *scatterer, const EmitterType *emitter)
-      : scatterer_(scatterer), emitter_(emitter) {}
-  template <class EmitterType>
-  Material(std::nullptr_t, const EmitterType *emitter)
-      : scatterer_(nullptr), emitter_(emitter) {}
-  template <class ScatterType>
-  Material(const ScatterType *scatterer, std::nullptr_t)
-      : scatterer_(scatterer), emitter_(nullptr) {}
+  void Add(WeightedComponent w_comp) { components_.push_back(w_comp); }
 
-  Material &SetScatterer(Scatterer *scatterer);
-  Material &SetEmitter(Emitter *emitter);
+  template <class ComponentType>
+  void Add(ComponentType comp) {
+    components_.push_back(WeightedComponent(comp));
+  }
 
-  // call scatterer
-  std::vector<Vec3> InverseScatter(Vec3 scattered_ray, Vec3 object_normal,
-                                   int max_number_of_rays,
-                                   std::mt19937 *random_number_generator) const;
+  template <class ComponentType, class... ComponentTypes>
+  void Add(ComponentType comp1, ComponentTypes... more_comps) {
+    Add(comp1);
+    Add(more_comps...);
+  }
 
-  // call scatterer
-  const ColorData ScatteredColor(const ReferenceFrameHit &rf_hit,
-                                 const Vec3 &pre_scattered,
-                                 const ColorData &pre_scatter_color) const;
+  friend Material operator+(const Material &mat1, const Material &mat2) {
+    Material new_mat(mat1);
+    new_mat.components_.insert(new_mat.components_.end(),
+                               mat2.components_.begin(),
+                               mat2.components_.end());
+    return new_mat;
+  }
 
-  // call emitter
-  const ColorData EmittedColor(const ReferenceFrameHit &rf_hit) const;
+  friend Material operator*(const Material &mat, float factor) {
+    Material new_mat(mat);
+    std::for_each(
+        new_mat.components_.begin(), new_mat.components_.end(),
+        [factor](WeightedComponent &w_comp) { w_comp.weight *= factor; });
+    return new_mat;
+  }
 
- private:
-  const Scatterer *scatterer_;
-  const Emitter *emitter_;
-};
-
-class LambertianScatter : public Scatterer {
- public:
-  std::vector<Vec3> InverseScatter(
-      Vec3 scattered_ray, Vec3 object_normal, int max_number_of_rays,
+  std::vector<ScatterData> InverseScatter(
+      const ReferenceFrameHit &rf_hit, int scatter_rays,
       std::mt19937 *random_number_generator) const override;
 
-  const ColorData ScatteredColor(
-      const ReferenceFrameHit &rf_hit, const Vec3 &pre_scattered,
-      const ColorData &pre_scatter_color) const override;
+  ColorData ScatteredColor(const ColorData &pre_scatter_color,
+                           const ReferenceFrameHit &rf_hit,
+                           const Vec3 &pre_scattered,
+                           int material_data) const override;
 
-  static Vec3 RandomUnitVector(std::mt19937 *r_gen);
-  static Vec3 LambertianInverseRay(Vec3 object_normal, std::mt19937 *r_gen);
+  ColorData EmittedColor(const ReferenceFrameHit &rf_hit) const override;
 
  private:
-  /*
-    TODO(c): define absorption data, use in Scattered Color
-  */
+  ComponentList components_;
 };
 
-class MonochromaticLight : public Emitter {
+inline Material operator+(const WeightedComponent &comp1,
+                          const WeightedComponent &comp2) {
+  return Material(comp1, comp2);
+}
+
+inline Material operator*(float factor, const Material &mat) { return mat * factor; }
+
+inline Material operator+(const Material &mat, const WeightedComponent &comp) {
+  Material new_comp_mat(mat);
+  new_comp_mat.Add(comp);
+  return new_comp_mat;
+}
+
+class Lambertian : public Component {
+ public:
+  Lambertian(float albedo = 1.0f) : albedo_(albedo) {}
+
+  std::vector<ScatterData> InverseScatter(
+      const ReferenceFrameHit &rf_hit, int scatter_rays,
+      std::mt19937 *random_number_generator) const override;
+
+  ColorData ScatteredColor(const ColorData &pre_scatter_color,
+                           const ReferenceFrameHit &rf_hit,
+                           const Vec3 &pre_scattered,
+                           int material_data) const override;
+
+ private:
+  float albedo_;
+};
+
+class MonochromaticLight : public Component {
  public:
   /*
     Specify monochromatic light source by giving brightness
@@ -188,7 +192,7 @@ class MonochromaticLight : public Emitter {
     return MonochromaticLight(2 * M_PI / lambda_vacuum, brightness);
   };
 
-  const ColorData EmittedColor(const ReferenceFrameHit &rf_hit) const override;
+  ColorData EmittedColor(const ReferenceFrameHit &rf_hit) const override;
 
  private:
   const float brightness_;  // think: photons per second
@@ -237,22 +241,47 @@ const MonochromaticLight kDimBlue =
 const MonochromaticLight kDimPurple =
     MonochromaticLight::FromWavelength(410, 0.1f);
 
-class Mirror : public Scatterer {
+class Dielectric : public Component {
  public:
-  std::vector<Vec3> InverseScatter(
-      Vec3 scattered_ray, Vec3 object_normal, int max_number_of_rays,
+  Dielectric(float n) : n_(n) {}
+
+  std::vector<ScatterData> InverseScatter(
+      const ReferenceFrameHit &rf_hit, int scatter_rays,
       std::mt19937 *random_number_generator) const override;
 
-  const ColorData ScatteredColor(
-      const ReferenceFrameHit &rf_hit, const Vec3 &pre_scattered,
-      const ColorData &pre_scatter_color) const override;
+  ColorData ScatteredColor(const ColorData &pre_scatter_color,
+                           const ReferenceFrameHit &rf_hit,
+                           const Vec3 &pre_scattered,
+                           int material_data) const override;
 
  private:
+  float n_;  // refractive index
 };
 
-// TODO(c): add Material based on mirror
-// class Metal : public Material;
+const Dielectric kWater(1.3f);
+const Dielectric kGlass(1.5f);
+const Dielectric kDiamond(2.4f);
 
-// TODO(c): add refractive materials
-// class Dielectric : public Material{
-//};
+class Metal : public Component {
+ public:
+  // TODO(c): build in clamps for the values
+  Metal(float albedo = 1.0f, float fuzz = 0.0f)
+      : albedo_(albedo), fuzz_(fuzz) {}
+
+  std::vector<ScatterData> InverseScatter(
+      const ReferenceFrameHit &rf_hit, int scatter_rays,
+      std::mt19937 *random_number_generator) const override;
+
+  ColorData ScatteredColor(const ColorData &pre_scatter_color,
+                           const ReferenceFrameHit &rf_hit,
+                           const Vec3 &pre_scattered,
+                           int material_data) const override;
+
+ private:
+  float albedo_;
+  float fuzz_;
+};
+
+const Metal kMirror(1.0f, 0.0f);
+
+#endif
