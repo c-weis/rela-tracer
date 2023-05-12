@@ -36,8 +36,7 @@ class Object {
  public:
   Object(Material mat, Line worldline)
       : worldline_(worldline), mat_(std::make_shared<Material>(mat)) {}
-  Object(MaterialPtr mat, Line worldline)
-      : worldline_(worldline), mat_(mat) {}
+  Object(MaterialPtr mat, Line worldline) : worldline_(worldline), mat_(mat) {}
 
   Vec4 PosAt(float time) const;
   Vec4 PosAfter(float d_time) const;
@@ -236,8 +235,7 @@ class Camera {
   Vec3 GetVelocity() const { return worldline_.vel; }
   // Get image rays at specified point `t_cam_frame` in time
   // (given in the restframe of the camera, defaults to 0)
-  LineList ImageRays(int rays_per_pixel, std::mt19937 *r_gen,
-                     float t_cam_frame = 0) const;
+  LineList ImageRays(float delta_t_cam_frame = 0) const;
 
  private:
   // worldline of (pointlike) camera sensor
@@ -268,12 +266,9 @@ class Scene {
     Add(box.right);
   }
 
-  void AddCamera(const Camera &);
+  Scene& AddCamera(const Camera &);
 
-  void SetSkylight(Material material, Vec3 skylight_direction) {
-    skylight_ = std::make_shared<Material>(material);
-    skylight_direction_ = skylight_direction;
-  }
+  Scene& SetSkylight(const Spectrum skylight, Vec3 skylight_direction);
 
   const Camera &GetCamera(int index = 0) const;
 
@@ -281,12 +276,14 @@ class Scene {
   // in the scene
   OptionalHitRecord MostRecentHit(const Line &ray) const;
 
-  ColorData BackgroundColor(const Line &ray) const;
+  Spectrum EscapedRayColor(const Line &ray) const;
+  Scene &SetAmbientBackground(const Spectrum &bg_spectrum);
 
  private:
   CameraList cameras_;
   ObjectList objects_;
-  MaterialPtr skylight_ = nullptr;
+  Spectrum ambient_background_ = kBlack;
+  Spectrum skylight_ = kBlack;
   Vec3 skylight_direction_ = kDefaultNormal;
 };
 

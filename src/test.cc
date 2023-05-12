@@ -1,183 +1,400 @@
 // Copyright 2023 Christoph Weis
+#include "include/test.h"
+
 #include <cstdio>
 #include <iostream>
 
+#include "include/bitmap_image.h"
 #include "include/colors.h"
 #include "include/math.h"
-#include "include/scene.h"
 #include "include/tracer.h"
 
-// Helpful test vars
-Vec3 x(1, 0, 0);
-Vec3 y(0, 1, 0);
-Vec3 z(0, 0, 1);
+// TODO(c): figure out how to clean this up:
+// include these in the lib code somehow
 
-Scene ball_in_box(int width, int height) {
-  /*
-    BALL IN BOX
-    */
-  Scene scene;
+// Color constants
+const Spectrum kBrightRed = BrightNarrowBand(680);
+const Spectrum kBrightOrange = BrightNarrowBand(605);
+const Spectrum kBrightYellow = BrightNarrowBand(570);
+const Spectrum kBrightGreen = BrightNarrowBand(530);
+const Spectrum kBrightCyan = BrightNarrowBand(490);
+const Spectrum kBrightBlue = BrightNarrowBand(460);
+const Spectrum kBrightPurple = BrightNarrowBand(410);
+const Spectrum kLightRed = LightNarrowBand(680);
+const Spectrum kLightOrange = LightNarrowBand(605);
+const Spectrum kLightYellow = LightNarrowBand(580);
+const Spectrum kLightGreen = LightNarrowBand(530);
+const Spectrum kLightCyan = LightNarrowBand(490);
+const Spectrum kLightBlue = LightNarrowBand(460);
+const Spectrum kLightPurple = LightNarrowBand(410);
+const Spectrum kDimRed = DimNarrowBand(680);
+const Spectrum kDimOrange = DimNarrowBand(605);
+const Spectrum kDimYellow = DimNarrowBand(580);
+const Spectrum kDimGreen = DimNarrowBand(530);
+const Spectrum kDimCyan = DimNarrowBand(490);
+const Spectrum kDimBlue = DimNarrowBand(460);
+const Spectrum kDimPurple = DimNarrowBand(410);
 
-  // Camera
-  Vec3 cam_pos = kZero3;
-  Vec3 forward = -z;
-  Vec3 right = x;
-  Vec3 up = Cross(right, forward);
-  Vec3 backward = -forward;
-  Vec3 left = -right;
-  Vec3 down = -up;
+bool Tester::TestRandomness() {
+  const int kSampleSize = 10000;
 
-  Camera cam(cam_pos, forward, right, width, height);
-  scene.AddCamera(cam);
+  std::cout << "Testing randomness functions." << std::endl;
 
-  // Materials
-  Material bright_red_light = kBrightRed;
-  Component bright_green_light = kBrightGreen;
-  Component bright_blue_light = kBrightBlue;
-  Component dim_blue_light = kDimBlue;
-  Component lambertian = Lambertian(0.7f);
-  Component mirror = kMirror;
-  Component glass = kGlass;
+  std::cout << "---" << std::endl;
+  std::cout << "Generating uniform random reals in [0, 1)." << std::endl;
 
-  // Auxiliary screen & direction variables
-  float aspect = static_cast<float>(width) / height;
-  Vec3 screen_top = (right ^ forward) / aspect;
+  float first_moment_1 = 0;
+  float second_moment_1 = 0;
+  for (int i = 0; i < kSampleSize; i++) {
+    float real = RandomReal();
+    if (real < 0 || real >= 1) {
+      std::cout << "Error: produced random value " << real << " outside range."
+                << std::endl;
+      return false;
+    }
+    first_moment_1 += real;
+    second_moment_1 += real * real;
+  }
+  first_moment_1 /= kSampleSize;
+  second_moment_1 /= kSampleSize;
+  float std_dev_1 = sqrtf(second_moment_1 - first_moment_1 * first_moment_1);
 
-  // Add objects
-  Vec3 sphere_vel(0, 0, 0);
-  Vec3 sphere_O = 2 * forward;
-  float sphere_rad = 1.0f;
-  Sphere sphere(glass, sphere_O, sphere_rad, 0, sphere_vel);
-  scene.Add(sphere);
+  std::cout << "Generated " << kSampleSize << " random values." << std::endl
+            << "Mean: " << first_moment_1 << std::endl
+            << "Standard deviation: " << std_dev_1 << std::endl;
+  std::cout << "---" << std::endl;
 
-  Vec3 light_sphere_O = cam_pos + 0.5 * right + 1.5f * screen_top;
-  float light_sphere_rad = 0.6f;
-  Sphere light_sphere(bright_blue_light, light_sphere_O, light_sphere_rad);
-  // scene.Add(light_sphere);
-  //  Sphere small_mirror_sphere(&mirror, light_sphere_O, light_sphere_rad);
-  //  scene.Add(small_mirror_sphere);
+  std::cout << "Generating random vectors in unit ball." << std::endl;
+  Vec3 first_moment_2(0, 0, 0);
+  float second_moment_2 = 0;
+  for (int i = 0; i < kSampleSize; i++) {
+    Vec3 random_vec = RandomVectorInUnitBall();
+    if (random_vec.NormSq() >= 1 || random_vec.NormSq() == 0) {
+      std::cout << "Error: produced random vector " << random_vec
+                << " with norm " << random_vec.Norm() << " outside range."
+                << std::endl;
+      return false;
+    }
+    first_moment_2 = first_moment_2 + random_vec;
+    second_moment_2 += random_vec.NormSq();
+  }
+  first_moment_2 = first_moment_2 / kSampleSize;
+  second_moment_2 = second_moment_2 / kSampleSize;
+  float std_dev_2 =
+      sqrtf(second_moment_2 - Dot3(first_moment_2, first_moment_2));
 
-  Vec3 FDL = sphere_O - 3 * (forward + up + right);
-  Vec3 BDL = FDL + 6 * forward;
-  Vec3 FUL = FDL + 6 * up;
-  Vec3 FDR = FDL + 6 * right;
-  Box surrounding_box(lambertian, FDL, BDL, FUL, FDR);
-  surrounding_box.back.SetMaterial(mirror);
-  surrounding_box.down.SetMaterial(mirror);
-  surrounding_box.right.SetMaterial(glass);
-  surrounding_box.up.SetMaterial(bright_blue_light);
-  surrounding_box.left.SetMaterial(bright_red_light);
-  surrounding_box.front.SetMaterial(bright_green_light);
-  scene.Add(surrounding_box);
+  std::cout << "Generated " << kSampleSize << " random vectors." << std::endl
+            << "Mean: " << first_moment_2 << std::endl
+            << "Standard deviation: " << std_dev_2 << std::endl;
+  std::cout << "---" << std::endl;
 
-  return scene;
+  std::cout << "Generating random unit vectors." << std::endl;
+  float kEpsilon = 1e-6;
+  Vec3 first_moment_3(0, 0, 0);
+  float second_moment_3 = 0;
+  for (int i = 0; i < kSampleSize; i++) {
+    Vec3 random_vec = RandomUnitVector();
+    if (random_vec.NormSq() > 1 + kEpsilon ||
+        random_vec.NormSq() < 1 - kEpsilon) {
+      std::cout << "Error: produced random vector " << random_vec
+                << " with norm " << random_vec.Norm()
+                << " outside allowable range." << std::endl;
+      return false;
+    }
+    first_moment_3 = first_moment_3 + random_vec;
+    second_moment_3 += random_vec.NormSq();
+  }
+  first_moment_3 = first_moment_3 / kSampleSize;
+  second_moment_3 = second_moment_3 / kSampleSize;
+  float std_dev_3 =
+      sqrtf(second_moment_3 - Dot3(first_moment_3, first_moment_3));
+
+  std::cout << "Generated " << kSampleSize << " random unit vectors."
+            << std::endl
+            << "Mean: " << first_moment_3 << std::endl
+            << "Standard deviation: " << std_dev_3 << std::endl;
+  std::cout << "---" << std::endl;
+
+  std::cout << "Generating random vectors in unit disk." << std::endl;
+  Vec2 first_moment_4(0, 0);
+  float second_moment_4 = 0;
+  for (int i = 0; i < kSampleSize; i++) {
+    Vec2 random_vec = RandomVectorInUnitDisk();
+    float normSq = random_vec.x * random_vec.x + random_vec.y * random_vec.y;
+    if (normSq >= 1) {
+      std::cout << "Error: produced random vector (" << random_vec.x << ", "
+                << random_vec.y << ") with norm " << sqrtf(normSq)
+                << " outside range." << std::endl;
+      return false;
+    }
+    first_moment_4.x = first_moment_4.x + random_vec.x;
+    first_moment_4.y = first_moment_4.y + random_vec.y;
+    second_moment_4 += normSq;
+  }
+  first_moment_4.x = first_moment_4.x / kSampleSize;
+  first_moment_4.y = first_moment_4.y / kSampleSize;
+  float first_moment_4_normSq =
+      first_moment_4.x * first_moment_4.x + first_moment_4.y * first_moment_4.y;
+  second_moment_4 = second_moment_4 / kSampleSize;
+  float std_dev_4 = sqrtf(second_moment_4 - first_moment_4_normSq);
+
+  std::cout << "Generated " << kSampleSize << " random unit vectors."
+            << std::endl
+            << "Mean: (" << first_moment_4.x << ", " << first_moment_4.y << ")"
+            << std::endl
+            << "Standard deviation: " << std_dev_4 << std::endl;
+
+  std::cout << "---" << std::endl;
+  std::cout << "Tests completed successfully." << std::endl;
+  return true;
 }
 
-Scene moving_sphere(int width, int height) {
-  /*
-    MOVING SPHERE
-  */
-  Scene scene;
+bool Tester::TestColors() {
+  const float min_lambda = 300;  // nm
+  const float max_lambda = 800;  // nm
+  const float d_lambda = 0.5;
+  const unsigned int lambda_side = (max_lambda - min_lambda) / d_lambda;
 
-  // Camera
-  Vec3 cam_pos = kZero3;
-  Vec3 forward = -z;
-  Vec3 right = x;
-  Vec3 up = Cross(right, forward);
-  Vec3 backward = -forward;
-  Vec3 left = -right;
-  Vec3 down = -up;
+  const float narrowband_sig = 0.5f;        // nm
+  const float narrowband_amplitude = 1.0f;  // nm
+  const float absorptionband_sig = 50.0f;
 
-  Camera cam(cam_pos, forward, right, width, height);
-  scene.AddCamera(cam);
+  const float min_brightness = 0.0f;
+  const float max_brightness = 1.0f;
+  const float d_brightness = 0.001f;
+  const float rescale_factor = 255.0f;
+  const unsigned int brightness_side =
+      (max_brightness - min_brightness) / d_brightness;
 
-  Vec3 skylight_direction = down.NormalizedNonzero();
-  scene.SetSkylight(kBrightYellow, skylight_direction);
+  const float min_bandwidth = 0.0f;
+  const float max_bandwidth = 300.0f;
+  const float d_bandwidth = 0.5f;
+  const unsigned int bandwidth_side =
+      (max_bandwidth - min_bandwidth) / d_bandwidth;
 
-  // Materials
-  Material clean_metal = Metal(0.9f);
-  Material fuzzy_metal = Metal(0.8f, 0.4f);
-  Material lambertian = Lambertian(0.7f);
-  Material bright_green_light = kBrightGreen;
-  Material mirror = kMirror;
-  Material glass = kGlass;
+  Spectrum super_dim_white_emission(kWhite * 0.01);
 
-  // Add objects
-  Vec3 sphere_vel = 0.3 * right;
-  Vec3 sphere_O = 3 * forward;
-  float sphere_rad = 1.0f;
-  Sphere sphere(glass, sphere_O, sphere_rad, 0, sphere_vel);
-  scene.Add(sphere);
+  std::string filename1 = "images/lambda_brightness.bmp";
+  std::string filename2 = "images/lambda_bandwidth.bmp";
+  std::string filename3 = "images/lambda_lambda.bmp";
+  std::string filename4 = "images/emit_absorb.bmp";
+  std::string filename5 = "images/absorb_absorb_parallel.bmp";
+  std::string filename6 = "images/absorb_absorb_series.bmp";
 
-  Vec3 plane_O = sphere_O + down * 3 * sphere_rad;
-  Vec3 plane_A = plane_O + right;
-  Vec3 plane_B = plane_O + forward;
-  Plane plane(fuzzy_metal, plane_O, plane_A, plane_B);
-  scene.Add(plane);
+  SpectrumTransform no_transform;
 
-  float mirror_side = 8.0f;
-  Vec3 mirror_O = 10 * forward - mirror_side / 2.0f * (up + right + backward);
-  Vec3 mirror_A = mirror_O + mirror_side * (right + backward);
-  Vec3 mirror_B = mirror_O + mirror_side * up;
-  Parallelogram mirror_plane(clean_metal, mirror_O, mirror_A, mirror_B);
-  scene.Add(mirror_plane);
+  std::cout << "Testing narrowband emission. Varying lambda and brightness."
+            << std::endl;
 
-  return scene;
+  BitmapImage test_image(lambda_side, brightness_side);
+
+  for (int y = 0; y < brightness_side; y++) {
+    float brightness = min_brightness + d_brightness * y;
+    for (int x = 0; x < lambda_side; x++) {
+      float emit_lambda = min_lambda + d_lambda * x;
+
+      if (static_cast<int>(floorf(emit_lambda)) % 100 < d_lambda) {
+        // place white tick
+        test_image.set_pixel(x, y, 255, 255, 255);
+      } else if (static_cast<int>(floorf(emit_lambda)) % 50 < d_lambda) {
+        // place grey tick
+        test_image.set_pixel(x, y, 100, 100, 100);
+      } else {
+        // place actual color
+        Spectrum emission(
+            GaussianData(narrowband_amplitude, emit_lambda, narrowband_sig) *
+            brightness);
+        RGBData pixel_RGB =
+            no_transform.ColorFrom(emission).ToRGB(rescale_factor);
+        test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+      }
+    }
+  }
+
+  std::cout << "Outputting to " << filename1 << "." << std::endl;
+  test_image.save_image(filename1);
+  std::cout << "----" << std::endl;
+
+  std::cout
+      << "Testing generic gaussian emission. Varying mean lambda and bandwidth."
+      << std::endl;
+
+  test_image = BitmapImage(lambda_side, bandwidth_side);
+
+  for (int y = 0; y < bandwidth_side; y++) {
+    float bandwidth = min_bandwidth + d_bandwidth * y;
+    for (int x = 0; x < lambda_side; x++) {
+      float lambda = min_lambda + d_lambda * x;
+
+      if (static_cast<int>(floorf(lambda)) % 100 < d_lambda) {
+        // place white tick
+        test_image.set_pixel(x, y, 255, 255, 255);
+      } else if (static_cast<int>(floorf(lambda)) % 50 < d_lambda) {
+        // place grey tick
+        test_image.set_pixel(x, y, 100, 100, 100);
+      } else {
+        // place actual color
+        Spectrum emission(GaussianData(1.0f / bandwidth, lambda, bandwidth));
+        RGBData pixel_RGB =
+            no_transform.ColorFrom(emission).ToRGB(rescale_factor);
+        test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+      }
+    }
+  }
+
+  std::cout << "Outputting to " << filename2 << "." << std::endl;
+  test_image.save_image(filename2);
+  std::cout << "----" << std::endl;
+
+  std::cout
+      << "Testing color mixing of narrow band emissions. Varying lambda_x "
+         "and lambda_y."
+      << std::endl;
+
+  test_image = BitmapImage(lambda_side, lambda_side);
+
+  for (int y = 0; y < lambda_side; y++) {
+    float lambda_y = min_lambda + d_lambda * y;
+    for (int x = 0; x < lambda_side; x++) {
+      float lambda_x = min_lambda + d_lambda * x;
+
+      if ((static_cast<int>(floorf(lambda_x)) % 100 < d_lambda) ||
+          (static_cast<int>(floorf(lambda_y)) % 100 < d_lambda)) {
+        // place white tick
+        test_image.set_pixel(x, y, 255, 255, 255);
+      } else {
+        // place actual color: a mix of lambda_x and lambda_y narrowbands
+        Spectrum emission(
+            {GaussianData(narrowband_amplitude / 2, lambda_x, narrowband_sig),
+             GaussianData(narrowband_amplitude / 2, lambda_y, narrowband_sig)});
+        RGBData pixel_RGB =
+            no_transform.ColorFrom(emission).ToRGB(rescale_factor);
+        test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+      }
+    }
+  }
+
+  std::cout << "Outputting to " << filename3 << "." << std::endl;
+  test_image.save_image(filename3);
+  std::cout << "----" << std::endl;
+
+  std::cout << "Testing narrow band emission and absorption (with higher "
+               "bandwidth). Varying lambda_emit "
+               "and lambda_absorb."
+            << std::endl;
+
+  test_image = BitmapImage(lambda_side, lambda_side);
+
+  for (int y = 0; y < lambda_side; y++) {
+    float lambda_absorb = min_lambda + d_lambda * y;
+    for (int x = 0; x < lambda_side; x++) {
+      float lambda_emit = min_lambda + d_lambda * x;
+
+      if ((static_cast<int>(floorf(lambda_emit)) % 100 < d_lambda) ||
+          (static_cast<int>(floorf(lambda_absorb)) % 100 < d_lambda)) {
+        // place white tick
+        test_image.set_pixel(x, y, 255, 255, 255);
+      } else {
+        // place actual color: emission at lambda_emit, absorption at
+        // lambda_absorb
+        Spectrum emission(
+            GaussianData(narrowband_amplitude, lambda_emit, narrowband_sig));
+        Spectrum absorption(GaussianData(narrowband_amplitude, lambda_absorb,
+                                         absorptionband_sig));
+        SpectrumTransform new_transform(no_transform);
+        new_transform.ApplyAbsorption(absorption);
+        RGBData pixel_RGB =
+            new_transform.ColorFrom(emission).ToRGB(rescale_factor);
+        test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+      }
+    }
+  }
+
+  std::cout << "Outputting to " << filename4 << "." << std::endl;
+  test_image.save_image(filename4);
+  std::cout << "----" << std::endl;
+
+  std::cout << "Testing single absorption with multiple modes. Varying "
+               "lambda_absorb_x "
+               "and lambda_absorb_y."
+            << std::endl;
+
+  test_image = BitmapImage(lambda_side, lambda_side);
+
+  for (int y = 0; y < lambda_side; y++) {
+    float lambda_absorb_y = min_lambda + d_lambda * y;
+    for (int x = 0; x < lambda_side; x++) {
+      float lambda_absorb_x = min_lambda + d_lambda * x;
+
+      if ((static_cast<int>(floorf(lambda_absorb_x)) % 100 < d_lambda) ||
+          (static_cast<int>(floorf(lambda_absorb_y)) % 100 < d_lambda)) {
+        // place white tick
+        test_image.set_pixel(x, y, 0, 0, 0);
+      } else {
+        // place actual color: emission at lambda_emit, absorption at
+        // lambda_absorb
+        Spectrum absorption({GaussianData(narrowband_amplitude, lambda_absorb_x,
+                                          absorptionband_sig),
+                             GaussianData(narrowband_amplitude, lambda_absorb_y,
+                                          absorptionband_sig)});
+        SpectrumTransform new_transform(no_transform);
+        new_transform.ApplyAbsorption(absorption);
+        RGBData pixel_RGB = new_transform.ColorFrom(super_dim_white_emission)
+                                .ToRGB(rescale_factor);
+        test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+      }
+    }
+  }
+
+  std::cout << "Outputting to " << filename5 << "." << std::endl;
+  test_image.save_image(filename5);
+  std::cout << "----" << std::endl;
+
+  std::cout << "Testing two absorptions with a single mode each. Varying "
+               "lambda_absorb_x "
+               "and lambda_absorb_y."
+            << std::endl;
+
+  test_image = BitmapImage(lambda_side, lambda_side);
+
+  for (int y = 0; y < lambda_side; y++) {
+    float lambda_absorb_y = min_lambda + d_lambda * y;
+    for (int x = 0; x < lambda_side; x++) {
+      float lambda_absorb_x = min_lambda + d_lambda * x;
+
+      if ((static_cast<int>(floorf(lambda_absorb_x)) % 100 < d_lambda) ||
+          (static_cast<int>(floorf(lambda_absorb_y)) % 100 < d_lambda)) {
+        // place white tick
+        test_image.set_pixel(x, y, 0, 0, 0);
+      } else {
+        // place actual color: emission at lambda_emit, absorption at
+        // lambda_absorb
+        Spectrum absorption1(GaussianData(narrowband_amplitude, lambda_absorb_x,
+                                          absorptionband_sig));
+        Spectrum absorption2(GaussianData(narrowband_amplitude, lambda_absorb_y,
+                                          absorptionband_sig));
+        SpectrumTransform new_transform(no_transform);
+        new_transform.ApplyAbsorption(absorption1);
+        new_transform.ApplyAbsorption(absorption2);
+        RGBData pixel_RGB = new_transform.ColorFrom(super_dim_white_emission)
+                                .ToRGB(rescale_factor);
+        test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+      }
+    }
+  }
+
+  std::cout << "Outputting to " << filename6 << "." << std::endl;
+  test_image.save_image(filename6);
+  std::cout << "----" << std::endl;
+
+  return true;
 }
 
-Scene glass_ball(int width, int height) {
-  Scene scene;
+bool Tester::TestLorentzTransforms() {}
 
-  Vec3 forward = y;
-  Vec3 right = x;
-  Vec3 up = right ^ forward;
-  Camera cam(kZero3 + up, forward, right, width, height);
-  scene.AddCamera(cam);
+bool Tester::TestIntersections() {}
 
-  Material lambertian = Lambertian(0.7f);
-  Material clean_metal = Metal(0.7f);
-  Material glass = kGlass;
-
-  Material bright_green_light = kBrightGreen;
-  Material bright_blue_light = kBrightBlue;
-
-  scene.SetSkylight(kBrightYellow, -up);
-
-  Vec3 O1 = kZero3;
-  scene.Add(Plane(0.9 * lambertian + 0.1 * kMirror, O1, O1 + right, O1 + forward));
-
-  float r2 = 0.7f;
-  Vec3 O2 = O1 + 2 * forward + r2 * up;
-  scene.Add(Sphere(glass, O2, r2));
-
-  float r3 = 0.5f;
-  Vec3 O3 = O2 + (r2 + r3) * right - r2 * up + r3 * up + r3/2.0f * forward;
-  scene.Add(Sphere(bright_green_light, O3, r3));
-
-  float r4 = 0.5f;
-  Vec3 O4 = O2 - (r2 + r4) * right - r2 * up + r4 * up;
-  scene.Add(Sphere(bright_blue_light, O4, r4));
-
-  return scene;
-}
-
-int main(int argc, char *argv[]) {
-  // Basic settings
-  const int width = 500;
-  const int height = 500;
-  const int rays_per_pixel = 30;
-  const int depth = 5;
-  const std::vector<int> scatter_ray_counts = {10, 5, 1};
-
-  Scene scene = glass_ball(width, height);
-
-  // Raytracer
-  Tracer tracey(scene);
-  tracey.RenderImage(rays_per_pixel, depth, scatter_ray_counts, 0,
-                     RenderMode::kOutputFile, "test");
-
-  return EXIT_SUCCESS;
-}
+bool Tester::RunAllTests() { return TestRandomness() && TestColors(); }
 
 /* PASSED: Test Lambertian scattering
 // (avg should give -2/3 along chosen norm, avg_normsq should be 1)
@@ -252,4 +469,11 @@ for (Line ray : test_rays) {
   }
   printf("\n");
 }
+
 */
+
+int main() {
+  Tester test;
+
+  return test.RunAllTests();
+}

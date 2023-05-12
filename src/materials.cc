@@ -6,104 +6,122 @@
 
 #include "include/colors.h"
 #include "include/math.h"
+#include "materials.h"
 
-// Reflects vector in plane given the normal vector
-// TODO(c): normalise `normal`?
-Vec3 Reflect(const Vec3 &ray_vel, const Vec3 &normal) {
-  return ray_vel - 2 * ray_vel.Dot3(normal) * normal;
+Vec3 LambertianInverseRay(Vec3 object_normal) {
+  return -(object_normal + RandomUnitVector()).NormalizedNonzero();
 }
 
-Vec3 RandomVectorInUnitBall(std::mt19937 *r_gen) {
-  Vec3 vec(1, 1, 1);
-  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-  while (vec.NormSq() > 1 || vec.NormSq() == 0.0f) {
-    vec = Vec3(dist(*r_gen), dist(*r_gen), dist(*r_gen));
+ScatterData Material::InverseScatter(
+    const ReferenceFrameHit &rf_hit,
+    SpectrumTransform &cumulative_transform) const {
+  if (dielectric_) {
+    return DielectricInverseScatter(rf_hit, cumulative_transform);
   }
-  return vec;
-}
+  float scatter_selector = RandomReal() * non_dielectric_multipliers_();
 
-Vec3 RandomUnitVector(std::mt19937 *r_gen) {
-  Vec3 vec = RandomVectorInUnitBall(r_gen);
-  return vec.NormalizedNonzero();
-}
-
-Vec3 LambertianInverseRay(Vec3 object_normal, std::mt19937 *r_gen) {
-  return -(object_normal + RandomUnitVector(r_gen)).NormalizedNonzero();
-}
-
-std::vector<ScatterData> Material::InverseScatter(
-    const ReferenceFrameHit &rf_hit, int scatter_rays,
-    std::mt19937 *random_number_generator) const {
-  std::vector<ScatterData> inverse_scatter_velocities;
-  for (std::size_t component_index = 0; component_index < components_.size();
-       component_index++) {
-    // Scatters from each component of the material. Component weights are
-    // applied here.
-    WeightedComponent w_comp = components_[component_index];
-    std::vector<ScatterData> inv_scatter = w_comp.comp->InverseScatter(
-        rf_hit, scatter_rays, random_number_generator);
-    std::for_each(inv_scatter.begin(), inv_scatter.end(),
-                  [component_index, w_comp](ScatterData s_data) {
-                    s_data.weight *= w_comp.weight;
-                    s_data.material_data = component_index;
-                  });
-    inverse_scatter_velocities.insert(inverse_scatter_velocities.end(),
-                                      inv_scatter.begin(), inv_scatter.end());
+  if (scatter_selector < diffuse_) {
+    return LambertianInverseScatter(rf_hit, cumulative_transform);
+  } else if (scatter_selector < diffuse_ + specular_) {
+    return SpecularInverseScatter(rf_hit, cumulative_transform);
+  } else {
+    return SubsurfaceInverseScatter(rf_hit, cumulative_transform);
   }
-  return inverse_scatter_velocities;
 }
-
-ColorData Material::ScatteredColor(const ColorData &pre_scatter_color,
-                                   const ReferenceFrameHit &rf_hit,
-                                   const Vec3 &pre_scattered,
-                                   int material_data) const {
-  // Material uses material_data to index the
-  // scattering material responsible for each ray
-  return components_[material_data].comp->ScatteredColor(pre_scatter_color,
-                                                         rf_hit, pre_scattered);
-}
-
-ColorData Material::EmittedColor(const ReferenceFrameHit &rf_hit) const {
-  ColorData emitted = kBlack;
-  for (auto w_comp : components_) {
-    emitted += w_comp.comp->EmittedColor(rf_hit) * w_comp.weight;
+Material &Material::SetProperty(std::string scalar_property_name,
+                                float new_value) {
+  if (scalar_property_name == "albedo") {
+    albedo_ = new_value;
+  } else if (scalar_property_name == "diffuse") {
+    diffuse_ = new_value;
+  } else if (scalar_property_name == "specular") {
+    specular_ = new_value;
+  } else if (scalar_property_name == "fuzz") {
+    fuzz_ = new_value;
+  } else if (scalar_property_name == "dielectric_n") {
+    dielectric_n_ = new_value;
+  } else if (scalar_property_name == "subsurface_scatters") {
+    subsurface_scatters_ = new_value;
+  } else {
+    throw std::invalid_argument("There's no scalar property with name '" +
+                                scalar_property_name + "'.");
   }
-  return emitted;
+  return *this;
 }
 
-std::vector<ScatterData> Lambertian::InverseScatter(
-    const ReferenceFrameHit &rf_hit, int scatter_rays,
-    std::mt19937 *r_gen) const {
-  std::vector<ScatterData> de_scatter_velocities;
-  std::generate_n(
-      std::back_inserter(de_scatter_velocities), scatter_rays,
-      [rf_hit, r_gen]() {
-        return ScatterData(LambertianInverseRay(rf_hit.normal, r_gen));
-      });
-  return de_scatter_velocities;
+Material &Material::SetProperty(std::string spectral_property_name,
+                                Spectrum new_value) {
+  if (spectral_property_name == "emission") {
+    emission_ = new_value;
+  } else if (spectral_property_name == "absorption") {
+    absorption_ = new_value;
+  } else if (spectral_property_name == "subsurface absorption") {
+    subsurface_absorption_ = new_value;
+  } else {
+    throw std::invalid_argument("There's no spectral property with name '" +
+                                spectral_property_name + "'.");
+  }
+  return *this;
 }
 
-ColorData Lambertian::ScatteredColor(const ColorData &pre_scatter_color,
-                                     const ReferenceFrameHit &rf_hit,
-                                     const Vec3 &pre_scattered,
-                                     int material_data) const {
-  return pre_scatter_color * albedo_;
+Material &Material::SetProperty(std::string bool_property_name,
+                                bool new_value) {
+  if (bool_property_name == "dielectric") {
+    dielectric_ = new_value;
+  } else {
+    throw std::invalid_argument("There's no boolean property with name '" +
+                                bool_property_name + "'.");
+  }
+  return *this;
 }
 
-std::vector<ScatterData> Dielectric::InverseScatter(
-    const ReferenceFrameHit &rf_hit, int scatter_rays,
-    std::mt19937 *random_number_generator) const {
+Spectrum Material::EmissionSpectrum(const ReferenceFrameHit &rf_hit) const {
+  // TODO(c): is it right for this to have the dot product factor??
+  return Dot3(rf_hit.normal, rf_hit.scattered) * emission_;
+}
+
+Spectrum Material::AbsorptionCurve(const ReferenceFrameHit &rf_hit) const {
+  // No dot product factor here, because the absorption curve specifies
+  // the *fraction* of light rays absorbed depending on wavelength
+  return absorption_;
+}
+
+ScatterData Material::LambertianInverseScatter(
+    const ReferenceFrameHit &rf_hit,
+    SpectrumTransform &cumulative_transform) const {
+  cumulative_transform.ApplyFactor(albedo_ * non_dielectric_multipliers_());
+  cumulative_transform.ApplyAbsorption(absorption_);
+  return ScatterData(LambertianInverseRay(rf_hit.normal));
+}
+
+ScatterData Material::SpecularInverseScatter(
+    const ReferenceFrameHit &rf_hit,
+    SpectrumTransform &cumulative_transform) const {
+  cumulative_transform.ApplyFactor(albedo_ * non_dielectric_multipliers_());
+  cumulative_transform.ApplyAbsorption(absorption_);
+
+  Vec3 reflected_vel = rf_hit.scattered.Reflect(rf_hit.normal);
+  // apply fuzz
+  return ScatterData(
+      (reflected_vel.NormalizedNonzero() + fuzz_ * RandomVectorInUnitBall())
+          .NormalizedNonzero() *
+      reflected_vel.Norm());
+}
+
+ScatterData Material::DielectricInverseScatter(
+    const ReferenceFrameHit &rf_hit,
+    SpectrumTransform &cumulative_transform) const {
   // Adapted from “Ray Tracing in One Weekend.”
   // raytracing.github.io/books/RayTracingInOneWeekend.html
-  // (we need to keep track of the speed of the ray.)
+  // (we need to keep track of the group velocity of the ray.)
   Vec3 ray_vel = rf_hit.scattered;
   Vec3 normal = rf_hit.normal;
 
   float n_ratio;
   if (rf_hit.outside) {
-    n_ratio = 1 / n_;
+    n_ratio = 1 / dielectric_n_;
   } else {
-    n_ratio = n_;
+    n_ratio = dielectric_n_;
   }
   float n_ratio_2 = n_ratio * n_ratio;
 
@@ -112,8 +130,7 @@ std::vector<ScatterData> Dielectric::InverseScatter(
 
   if (new_sin_theta > 1.0f) {
     // reflect fully
-    return {ScatterData(Reflect(ray_vel, normal),
-                        static_cast<float>(scatter_rays))};
+    return ScatterData(ray_vel.Reflect(normal));
   }
 
   // Schlick's approximation
@@ -121,52 +138,35 @@ std::vector<ScatterData> Dielectric::InverseScatter(
   r0 = r0 * r0;
   float reflectance = r0 + (1 - r0) * powf(1 - cos_theta, 5);
 
-  ScatterData reflected(Reflect(ray_vel, normal), scatter_rays * reflectance);
+  float reflect_or_refract = RandomReal();
+
+  if (reflect_or_refract < reflectance) {
+    return ray_vel.Reflect(normal);
+  }  // else
 
   Vec3 parallel = Dot3(ray_vel, normal) * normal;
   Vec3 new_perpendicular = n_ratio_2 * (ray_vel - parallel);
   Vec3 new_parallel =
       sqrtf(ray_vel.NormSq() * n_ratio_2 - new_perpendicular.NormSq()) * normal;
   Vec3 refracted_vel = new_perpendicular + new_parallel;
-
-  ScatterData refracted(refracted_vel, scatter_rays * (1 - reflectance));
-  return {reflected, refracted};
+  return ScatterData(refracted_vel);
 }
 
-ColorData Dielectric::ScatteredColor(const ColorData &pre_scatter_color,
-                                     const ReferenceFrameHit &rf_hit,
-                                     const Vec3 &pre_scattered,
-                                     int material_data) const {
-  return pre_scatter_color;
+ScatterData Material::SubsurfaceInverseScatter(
+    const ReferenceFrameHit &rf_hit,
+    SpectrumTransform &cumulative_transform) const {
+  cumulative_transform.ApplyFactor(albedo_ * non_dielectric_multipliers_());
+  cumulative_transform.ApplyAbsorption(subsurface_absorption_);
+
+  return ScatterData(LambertianInverseRay(rf_hit.normal));
 }
 
-ColorData MonochromaticLight::EmittedColor(
-    const ReferenceFrameHit &rf_hit) const {
-  Vec4 k(omega_, omega_ * rf_hit.scattered / rf_hit.scattered.NormSq());
-  return ColorData(
-      {LightRay(brightness_ * Dot3(rf_hit.scattered, rf_hit.normal), k)});
+Material DielectricMaterial(float dielectric_n) {
+  return Material(1.0f, 0.0f, 0.0f, 0.0f, kBlack, kBlack, true, dielectric_n);
 }
 
-std::vector<ScatterData> Metal::InverseScatter(const ReferenceFrameHit &rf_hit,
-                                               int scatter_rays,
-                                               std::mt19937 *r_gen) const {
-  // Following “Ray Tracing in One Weekend.”
-  // raytracing.github.io/books/RayTracingInOneWeekend.html
-  Vec3 reflected_ray = Reflect(rf_hit.scattered, rf_hit.normal);
-  if (fuzz_ == 0.0f) {
-    return {ScatterData(reflected_ray, static_cast<float>(scatter_rays))};
-  }
-  std::vector<ScatterData> prescattered_rays;
-  prescattered_rays.assign(scatter_rays, ScatterData(reflected_ray));
-  for (ScatterData &w_vel : prescattered_rays) {
-    w_vel.vel = w_vel.vel + fuzz_ * RandomVectorInUnitBall(r_gen);
-  }
-  return prescattered_rays;
+Material Metal(float albedo, Spectrum absorption, float fuzz) {
+  return Material(albedo, 0.0f, 1.0f, fuzz, absorption);
 }
 
-ColorData Metal::ScatteredColor(const ColorData &pre_scatter_color,
-                                const ReferenceFrameHit &rf_hit,
-                                const Vec3 &pre_scattered,
-                                int material_data) const {
-  return pre_scatter_color * albedo_;
-}
+Material Mirror(float fuzz) { return Metal(1.0f, kBlack, fuzz); }

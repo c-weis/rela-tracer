@@ -8,6 +8,7 @@
 
 #include "include/colors.h"
 #include "include/materials.h"
+#include "scene.h"
 
 // Constant allowing for rounding errors in
 // computing intersections of scattered rays
@@ -16,39 +17,39 @@ const float kTimeEpsilon = 5e-6f;
 /*
   CAMERA DATA
 */
-LineList Camera::ImageRays(int rays_per_pixel, std::mt19937 *r_gen,
-                           float t_cam_frame) const {
+// Computes the list of image rays for the image received at
+// the camera after delta_t has elapsed
+// (counted in camera ref frame, from camera origin time)
+LineList Camera::ImageRays(float delta_t) const {
   float aspect = static_cast<float>(screen_width_) / screen_height_;
   Vec3 central_line = screen_centre_;
   Vec3 right = screen_right_;
   Vec3 down = Cross(central_line, right) / aspect;
 
-  std::uniform_real_distribution<float> dist(0, 1);
-
   LineList rays;
-  rays.reserve(screen_width_ * screen_height_ * rays_per_pixel);
-  float dx = 2.0f / screen_width_;
-  float dy = 2.0f / screen_height_;
+  rays.reserve(screen_width_ * screen_height_);
+  const float dx = 2.0f / screen_width_;
+  const float dy = 2.0f / screen_height_;
   for (int j = 0; j < screen_height_; j++) {
-    float y = -1.0f + j * dy;
     for (int i = 0; i < screen_width_; i++) {
-      float x = -1.0f + i * dx;
-      for (int ray = 0; ray < rays_per_pixel; ray++) {
-        float random_dx = dist(*r_gen) * dx;
-        float random_dy = dist(*r_gen) * dy;
-        Line ray_camera_frame =
-            Line(Vec4(t_cam_frame, kZero3),
-                 -(central_line + x * right + y * down).NormalizedNonzero());
-        // transform to standard frame
-        rays.push_back(ray_camera_frame.TransformedFromFrame(worldline_));
-      }
+      Vec2 random_vec = RandomVectorInUnitDisk();
+      float x = -1.0f + (i + 0.5f + random_vec.x * 0.7071) * dx;
+      float y = -1.0f + (j + 0.5f + random_vec.y * 0.7071) * dy;
+      Line ray_camera_frame =
+          Line(worldline_.PosAfter(delta_t),
+               -(central_line + x * right + y * down).NormalizedNonzero());
+      // transform to standard frame
+      rays.push_back(ray_camera_frame.TransformedFromFrame(worldline_));
     }
   }
 
   return rays;
 }
 
-void Scene::AddCamera(const Camera &camera) { cameras_.push_back(camera); }
+Scene &Scene::AddCamera(const Camera &camera) {
+  cameras_.push_back(camera);
+  return *this;
+}
 
 const Camera &Scene::GetCamera(int index) const {
   if (index > cameras_.size() - 1) {
@@ -56,6 +57,12 @@ const Camera &Scene::GetCamera(int index) const {
                                 " exceeds number of cameras in Scene.");
   }
   return cameras_.at(index);
+}
+
+Scene &Scene::SetSkylight(Spectrum skylight_spectrum, Vec3 skylight_direction) {
+  skylight_ = skylight_spectrum;
+  skylight_direction_ = skylight_direction;
+  return *this;
 }
 
 /*
@@ -197,14 +204,13 @@ OptionalHitRecord Scene::MostRecentHit(const Line &ray) const {
   return most_recent_hit;
 }
 
-ColorData Scene::BackgroundColor(const Line &ray) const {
-  if (skylight_ == nullptr) {
-    return kBlack;
-  }
-  // TODO(c): The code below simply assumes that EmittedColor is
-  //          position independent. This should be built in.
-  return skylight_->EmittedColor(
-      ReferenceFrameHit(kZero4, skylight_direction_, ray.vel));
+Spectrum Scene::EscapedRayColor(const Line &ray) const {
+  return ambient_background_ + skylight_ * Dot3(skylight_direction_, ray.vel);
+}
+
+Scene &Scene::SetAmbientBackground(const Spectrum &bg_spectrum) {
+  ambient_background_ = bg_spectrum;
+  return *this;
 }
 
 OptionalReferenceFrameHit Shape2D::intersect_in_rest_frame(

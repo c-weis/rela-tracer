@@ -9,236 +9,285 @@
 #include <random>
 #include <vector>
 
+#include "include/bitmap_image.h"
 #include "include/materials.h"
 #include "include/math.h"
 #include "include/scene.h"
+#include "tracer.h"
 
-const int kRescaleFactorRays = 100;
+const int kRescaleFactorRays = 1000;
 
-bool Tracer::RenderImage(int rays_per_pixel, int depth,
-                         std::vector<int> scatter_ray_counts, int camera_index,
-                         RenderMode render_mode, std::string filename) const {
+// Updates the given pixel color array by tracing along the image rays with
+// the specified parameters.
+// Note that iteration=0 automatically overwrites the rgb_array, which allows
+// easy reuse of the same array for independent frames in a film.
+void Tracer::UpdateFrame(const LineList &image_rays, int depth, Vec3 cam_vel,
+                         int iteration, std::vector<rgbData> &rgb_array) const {
+  for (int pixel = 0; pixel < image_rays.size(); pixel++) {
+    Line ray = image_rays[pixel];
+
+    rgbData pixel_rgb = TraceRay(ray, depth, cam_vel);
+
+    rgb_array[pixel] = (rgb_array[pixel] * iteration + pixel_rgb) /
+                       (static_cast<float>(iteration) + 1.0f);
+  }
+}
+
+std::string AssembleFilename(std::string prefix, std::string name, int number,
+                             int pad_to_digits, std::string postfix) {
+  std::string framenumber = std::to_string(number);
+  framenumber =
+      std::string(pad_to_digits - framenumber.size(), '0') + framenumber;
+  return prefix + name + "_" + framenumber + postfix;
+}
+
+float MaxValue(const std::vector<rgbData> &rgb_array) {
+  std::vector<float> max_rgb_array;
+  std::transform(rgb_array.cbegin(), rgb_array.cend(),
+                 std::back_inserter(max_rgb_array), [](const rgbData rgb) {
+                   return std::max(std::max(rgb.r, rgb.g), rgb.b);
+                 });
+  return *(std::max_element(max_rgb_array.cbegin(), max_rgb_array.cend()));
+}
+
+// Verbosely renders an image with the given parameters.
+bool Tracer::RenderImage(int rays_per_pixel, int depth, int camera_index,
+                         int iterations_per_update, std::string filename,
+                         float camera_time) const {
   // --------------------------------------------
   //    SETUP
   // --------------------------------------------
   Camera camera = scene_.GetCamera(camera_index);
-  uint width = camera.GetScreenWidth();
-  uint height = camera.GetScreenHeight();
+  unsigned int width = camera.GetScreenWidth();
+  unsigned int height = camera.GetScreenHeight();
 
-  // Fill `scatter_ray_counts` up to length `depth` with 1s.
-  scatter_ray_counts.insert(
-      scatter_ray_counts.end(),
-      std::max(depth - static_cast<int>(scatter_ray_counts.size()), 0), 1);
-  std::vector<int>::const_iterator scatter_ray_count_iterator =
-      scatter_ray_counts.cbegin();
+  LineList image_rays = camera.ImageRays(camera_time);
 
-  std::ofstream ofs;
-  SetupOutput(width, height, render_mode, ofs, filename);
-
-  LineList image_rays = camera.ImageRays(rays_per_pixel, r_gen_);
-
-  float rescale_factor =
-      EstimateRescaleFactor(&image_rays, kRescaleFactorRays,
-                            scatter_ray_count_iterator, camera.GetVelocity());
+  float rescale_factor = EstimateRescaleFactor(&image_rays, kRescaleFactorRays,
+                                               camera.GetVelocity());
 
   // Create array which we fill with the rgb values. We need this in order
   // to normalise them before converting them into RGB.
   std::vector<rgbData> rgb_array;
-  rgb_array.reserve(width * height);
+  rgb_array.assign(width * height, rgbData(0, 0, 0));
+
+  // Complete file names
+  std::string live_filename = "images/" + filename + ".bmp";
+  std::string normalised_filename = "images/n_" + filename + ".bmp";
 
   // --------------------------------------------
   //    LIVE RENDER
   // --------------------------------------------
+  std::cout << "Rendering scene with:" << std::endl;
+  std::cout << "depth: " << depth << ", rays per pixel:" << rays_per_pixel
+            << std::endl;
+  printf("Estimated rescale factor: %1.2f\n", rescale_factor);
+  std::cout << "Output to file " << live_filename << " every "
+            << iterations_per_update << " iterations." << std::endl;
+  std::cout << "Starting render." << std::endl;
+  for (int iteration = 0; iteration < rays_per_pixel; iteration++) {
+    // refresh image rays
+    image_rays = camera.ImageRays(camera_time);
 
-  for (auto first_pixel_ray = image_rays.cbegin();
-       first_pixel_ray < image_rays.cend(); first_pixel_ray += rays_per_pixel) {
-    // Average color data over rays for this pixel, turn to rgb and RGB values
-    // rgb is used for rescale later, RGB is used for live output
-    ColorData ray_color = kBlack;
-    for (auto ray = first_pixel_ray; ray < first_pixel_ray + rays_per_pixel;
-         ray++) {
-      ray_color += TraceRay(*ray, depth, scatter_ray_count_iterator,
-                            camera.GetVelocity());
+    UpdateFrame(image_rays, depth, camera.GetVelocity(), iteration, rgb_array);
+
+    if ((iteration + 1) % iterations_per_update == 0) {
+      OutputImage(width, height, rgb_array, rescale_factor, live_filename);
+      std::cout << "Done " << (iteration + 1) << "/" << rays_per_pixel
+                << std::endl;
     }
-    ray_color /= static_cast<float>(rays_per_pixel);
-    rgbData pixel_rgb = ray_color.To_rgb();
-    rgb_array.push_back(pixel_rgb);
-
-    RGBData pixel_RGB = pixel_rgb.ToRGB();
-
-    OutputPixel(pixel_RGB, std::distance(image_rays.cbegin(), first_pixel_ray),
-                width, height, render_mode, ofs);
   }
-  ofs.close();
 
   // --------------------------------------------
   //    COLOR-CORRECTED RENDER
   // --------------------------------------------
-  if (render_mode == RenderMode::kOutputFile) {
-    // Perform normalised render:
-    // We find the maximum rgb value, compute normalised RGB and output the
-    // result.
-    std::vector<float> max_rgb_array;
-    std::transform(rgb_array.cbegin(), rgb_array.cend(),
-                   std::back_inserter(max_rgb_array), [](const rgbData rgb) {
-                     return std::max(std::max(rgb.r, rgb.g), rgb.b);
-                   });
-    float max_rgb =
-        *(std::max_element(max_rgb_array.cbegin(), max_rgb_array.cend()));
-    const float rescale_factor = 255.0f / max_rgb;
-    std::vector<RGBData> RGB_array;
-    RGB_array.reserve(width * height);
-    std::transform(rgb_array.cbegin(), rgb_array.cend(),
-                   std::back_inserter(RGB_array),
-                   [rescale_factor](const rgbData rgb) {
-                     return rgb.ToRGB(rescale_factor);
-                   });
+  // Perform normalised render:
+  // We find the maximum rgb value, compute normalised RGB and output.
+  std::cout << "Normalising render, output to " << normalised_filename << "."
+            << std::endl;
+  rescale_factor = 255.0f / MaxValue(rgb_array);
 
-    std::cout << "Outputting to file: " << filename << ".ppm" << std::endl;
-    ofs.open(filename + ".ppm", std::ios_base::out | std::ios_base::binary);
-    ofs << "P6" << std::endl
-        << width << ' ' << height << std::endl
-        << "255" << std::endl;
+  OutputImage(width, height, rgb_array, rescale_factor, normalised_filename);
+  return EXIT_SUCCESS;
+}
 
-    for (auto [R, G, B] : RGB_array) {
-      ofs << static_cast<char>(R) << static_cast<char>(G)
-          << static_cast<char>(B);
+/*
+  TODO(c): add more documentation
+*/
+bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
+                        int iterations_per_update, std::string filename,
+                        float start_time, float end_time, float d_time) const {
+  // --------------------------------------------
+  //    SETUP
+  // --------------------------------------------
+  Camera camera = scene_.GetCamera(camera_index);
+  unsigned int width = camera.GetScreenWidth();
+  unsigned int height = camera.GetScreenHeight();
+
+  const int frames = (end_time - start_time) / d_time;
+
+  // Estimate rescale factor
+  float rescale_factor = 0.0f;
+  for (int estimator_frame = 0; estimator_frame < frames; estimator_frame++) {
+    float estimator_time = start_time + d_time * estimator_frame;
+    LineList image_rays = camera.ImageRays(estimator_time);
+    rescale_factor += EstimateRescaleFactor(&image_rays, kRescaleFactorRays,
+                                            camera.GetVelocity());
+  }
+  rescale_factor /= frames;
+
+  // --------------------------------------------
+  //    PREVIEW STAGE
+  // --------------------------------------------
+  // Quickly render a preview of each frame
+  const int preview_rays_per_pixel = 1;
+  const int preview_depth = 3;
+
+  const int frame_digits = static_cast<int>(std::floor(std::log10(frames))) + 1;
+
+  std::cout << "Outputting preview images to vidframes/ " << filename << "_XXX."
+            << std::endl;
+
+  // Create array which we fill with the rgb values. We need this in order
+  // to normalise them before converting them into RGB.
+  std::vector<rgbData> rgb_array;
+  rgb_array.assign(width * height, rgbData(0, 0, 0));
+
+  // Loop through preview frames
+  for (int preview_frame = 0; preview_frame < frames; preview_frame++) {
+    float preview_time = start_time + d_time * preview_frame;
+    std::string preview_filename = AssembleFilename(
+        "vidframes/", filename, preview_frame, frame_digits, ".bmp");
+    for (int iteration = 0; iteration < preview_rays_per_pixel; iteration++) {
+      LineList image_rays = camera.ImageRays(preview_time);
+      UpdateFrame(image_rays, preview_depth, camera.GetVelocity(), iteration,
+                  rgb_array);
     }
-    ofs.close();
+    OutputImage(width, height, rgb_array, rescale_factor, preview_filename);
+    std::cout << "Finished preview frame " << preview_frame + 1 << "."
+              << std::endl;
+  }
+  std::cout << "---------------------------------" << std::endl
+            << "Starting render." << std::endl;
+
+  // --------------------------------------------
+  //    LIVE RENDER
+  // --------------------------------------------
+  std::cout << "Rendering scene with:" << std::endl;
+  std::cout << "depth: " << depth << ", rays per pixel:" << rays_per_pixel
+            << std::endl;
+  std::printf("Estimated rescale factor: %1.2f\n", rescale_factor);
+  std::cout << "Updating files every " << iterations_per_update
+            << " iterations." << std::endl;
+  for (int frame = 0; frame < frames; frame++) {
+    float camera_time = start_time + d_time * frame;
+    std::string complete_filename =
+        AssembleFilename("vidframes/", filename, frames, frame_digits, ".bmp");
+
+    for (int iteration = 0; iteration < rays_per_pixel; iteration++) {
+      // refresh image rays
+      LineList image_rays = camera.ImageRays(camera_time);
+
+      UpdateFrame(image_rays, depth, camera.GetVelocity(), iteration,
+                  rgb_array);
+
+      if ((iteration + 1) % iterations_per_update == 0) {
+        OutputImage(width, height, rgb_array, rescale_factor,
+                    complete_filename);
+        std::cout << "Frame " << frame << " iteration " << (iteration + 1)
+                  << "/" << rays_per_pixel << std::endl;
+      }
+    }
+
+    // --------------------------------------------
+    //    COLOR-CORRECTED RENDER
+    // --------------------------------------------
+    // Perform normalised render:
+    // Find the maximum rgb value, compute normalised RGB and output.
+    std::cout << "Normalising frame " << frame << ".";
+    float frame_rescale_factor = 255.0f / MaxValue(rgb_array);
+    OutputImage(width, height, rgb_array, frame_rescale_factor,
+                AssembleFilename("vidframes/", "n_" + filename, frame,
+                                 frame_digits, ".bmp"));
+    std::cout << "Done." << std::endl
+              << "---------------------------------" << std::endl;
   }
 
   return EXIT_SUCCESS;
 }
 
-bool Tracer::SetupOutput(int width, int height, RenderMode render_mode,
-                         std::ofstream &ofs, std::string filename) const {
-  switch (render_mode) {
-    case kConsole:
-      std::cout << "Starting console render:" << std::endl;
-      break;
-    case kOutputFile:
-      if (filename.empty()) {
-        std::cerr
-            << "Error: File output mode picked, but no output file specified."
-            << std::endl;
-        return false;
-      }
-      std::cout << "Outputting to file: " << filename << "_live.ppm"
-                << std::endl;
-      ofs.open(filename + "_live.ppm",
-               std::ios_base::out | std::ios_base::binary);
-      ofs << "P6" << std::endl
-          << width << ' ' << height << std::endl
-          << "255" << std::endl;
-      break;
-    default:
-      std::cerr << "Error: Specified render mode not implemented." << std::endl;
-      return false;
-  }
-  return true;
-}
-
-float Tracer::EstimateRescaleFactor(
-    LineList *image_rays, int depth,
-    std::vector<int>::const_iterator scatter_ray_count_iterator,
-    Vec3 camera_vel) const {
+float Tracer::EstimateRescaleFactor(LineList *image_rays, int depth,
+                                    Vec3 camera_vel) const {
   // Estimate color rescale factor from kRescaleFactorRays random rays.
   // We assume that the average brightness is 0.5.
-  std::discrete_distribution<int> random_ray_index(
-      0, static_cast<int>(image_rays->size()));
-  ColorData sample_color = kBlack;
+  rgbData sample_color;
   for (int sample = 0; sample < kRescaleFactorRays; sample++) {
-    Line sample_ray = image_rays->at(random_ray_index(*r_gen_));
-    sample_color +=
-        TraceRay(sample_ray, depth, scatter_ray_count_iterator, camera_vel);
+    Line sample_ray =
+        image_rays->at(static_cast<int>(RandomReal() * image_rays->size()));
+    sample_color += TraceRay(sample_ray, depth, camera_vel);
   }
   sample_color /= kRescaleFactorRays;
-  rgbData sample_rgb = sample_color.To_rgb();
   float max_value =
-      std::max(sample_rgb.r, std::max(sample_rgb.g, sample_rgb.b));
+      std::max(sample_color.r, std::max(sample_color.g, sample_color.b));
   if (max_value > kDivisionEpsilon) {
-    return 0.5f / max_value;
+    return 0.5f / max_value * 255;
   }
-  return 1.0f;
+  return 255.0f;
 }
 
-void Tracer::OutputPixel(RGBData pixel_RGB, int pixel_index, int width,
-                         int height, RenderMode render_mode,
-                         std::ofstream &ofs) const {
-  switch (render_mode) {
-    case RenderMode::kConsole: {
-      int shade = (pixel_RGB.R + pixel_RGB.G + pixel_RGB.B) / 3;
-      std::cout << std::setw(3) << shade << " ";
-      if ((pixel_index + 1) % width == 0) {
-        std::cout << std::endl << std::flush;
+void Tracer::OutputImage(int width, int height,
+                         const std::vector<rgbData> &rgb_array,
+                         float rescale_factor, std::string filename) const {
+  BitmapImage img(width, height);
+
+  for (unsigned int y = 0; y < height; y++) {
+    for (unsigned int x = 0; x < width; x++) {
+      RGBData pixel = rgb_array[y * width + x].ToRGB(rescale_factor);
+      if (pixel.R + pixel.G + pixel.B > 0) {
+        // printf("pixel %d %d %d @ %d %d\n", pixel.R, pixel.G, pixel.B, x, y);
       }
-      break;
+      img.set_pixel(x, y, pixel.R, pixel.G, pixel.B);
     }
-    case RenderMode::kOutputFile: {
-      ofs << static_cast<char>(pixel_RGB.R) << static_cast<char>(pixel_RGB.G)
-          << static_cast<char>(pixel_RGB.B);
-      break;
-    }
-    default:
-      std::cout << ".";
-      break;
   }
+
+  img.save_image(filename);
 }
 
-ColorData Tracer::TraceRay(const Line &ray, int depth,
-                           std::vector<int>::const_iterator scatter_ray_count,
-                           Vec3 camera_vel) const {
-  ColorData color = ColorInStandardFrame(ray, depth, scatter_ray_count);
-  color.TransformToFrame(camera_vel);
-  return color;
-}
+rgbData Tracer::TraceRay(const Line &ray_0, int depth, Vec3 camera_vel) const {
+  rgbData color;
+  Line ray(ray_0);
+  SpectrumTransform cumulative_transform;
+  cumulative_transform.ApplyTransformationToFrame(ray.vel, camera_vel);
 
-ColorData Tracer::ColorInStandardFrame(
-    const Line &ray, int depth,
-    std::vector<int>::const_iterator scatter_ray_count) const {
-  if (depth <= 0) {
-    return kBlack;
+  for (int d = 0; d < depth; d++) {
+    OptionalHitRecord hit_ = scene_.MostRecentHit(ray);
+    if (!hit_.has_value()) {  // end of ray
+      return color +
+             cumulative_transform.ColorFrom(scene_.EscapedRayColor(ray));
+    }
+    HitRecord hit = hit_.value();
+
+    // extract hit data
+    const Object *hit_obj = hit.obj;
+    MaterialPtr mat = hit_obj->GetMaterial();
+    const Line object_worldline = hit_obj->GetWorldline();
+    const Vec3 object_velocity = hit_obj->GetVelocity();
+    Vec4 ray_origin = hit.rf.pos.TransformedFromFrame(object_worldline);
+
+    // DE-SCATTER:
+    // adjust cumulative_transform, add color & absorption, compute new ray
+    cumulative_transform.ApplyTransformationFromFrame(hit.rf.scattered,
+                                                      object_velocity);
+    // apply color data
+    color += cumulative_transform.ColorFrom(mat->EmissionSpectrum(hit.rf));
+    cumulative_transform.ApplyAbsorption(mat->AbsorptionCurve(hit.rf));
+    // de-scatter
+    ScatterData scatter_data =
+        mat->InverseScatter(hit.rf, cumulative_transform);
+    Vec3 ray_vel = scatter_data.vel_.TransformedFromFrame(object_velocity);
+    ray = Line(ray_origin, ray_vel);
+    cumulative_transform.ApplyTransformationToFrame(ray_vel, object_velocity);
   }
-
-  OptionalHitRecord hit_ = scene_.MostRecentHit(ray);
-  if (!hit_.has_value()) {
-    return scene_.BackgroundColor(ray);
-  }
-  HitRecord hit = hit_.value();
-
-  // extract hit data
-  const Object *hit_obj = hit.obj;
-  MaterialPtr mat = hit_obj->GetMaterial();
-  const Line object_worldline = hit_obj->GetWorldline();
-  const Vec3 object_velocity = hit_obj->GetVelocity();
-  Vec4 ray_origin = hit.rf.pos.TransformedFromFrame(object_worldline);
-
-  // de-scatter
-  int scatter_rays = *scatter_ray_count;
-  std::vector<ScatterData> scatter_data_obj_frame =
-      mat->InverseScatter(hit.rf, scatter_rays, r_gen_);
-
-  // recursively sum color
-  ColorData color = kBlack;
-  for (ScatterData s_data_of : scatter_data_obj_frame) {
-    Vec3 standard_frame_vel =
-        s_data_of.vel.TransformedFromFrame(object_velocity);
-    Line standard_frame_ray(ray_origin, standard_frame_vel);
-    ColorData pre_scatter_color =  // color of ray in object reference frame
-        ColorInStandardFrame(standard_frame_ray, depth - 1,
-                             scatter_ray_count + 1)
-            .TransformToFrame(object_velocity);
-    color += mat->ScatteredColor(pre_scatter_color, hit.rf, s_data_of.vel,
-                                 s_data_of.material_data) *
-             s_data_of.weight;
-  }
-  color /= static_cast<float>(scatter_rays);
-
-  // add emitted color by hit object
-  color += mat->EmittedColor(hit.rf);
-
-  // transform into standard frame
-  color.TransformFromFrame(hit.obj->GetVelocity());
 
   return color;
 }

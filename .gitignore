@@ -3,3 +3,5 @@ test
 profile
 *.out
 *.ppm
+*.exe
+.fake

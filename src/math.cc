@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <random>
 
 /*
     3-vector lib
@@ -117,6 +118,12 @@ Vec3 Vec3::TransformedFromFrame(const Vec3 &vel) const {
   return TransformedToFrame(-vel);
 }
 
+// Reflects vector in plane given the normal vector
+// TODO(c): normalise `normal`?
+Vec3 Vec3::Reflect(const Vec3 &normal) const {
+  return *this - 2 * Dot3(normal) * normal;
+}
+
 /*
     4-vector lib
 */
@@ -215,4 +222,38 @@ Line Line::TransformedToFrame(const Line &other) const {
 Line Line::TransformedFromFrame(const Line &other) const {
   return Line(origin.TransformedFromFrame(other),
               vel.TransformedFromFrame(other.vel));
+}
+
+/*
+  RANDOM MATH
+*/
+
+std::mt19937 r_gen;
+std::uniform_real_distribution<float> rand_real(0.0f, 1.0f);
+
+float RandomReal() { return rand_real(r_gen); }
+
+Vec3 RandomVectorInUnitBall() {
+  Vec3 vec(1, 1, 1);
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  while (vec.NormSq() >= 1 || vec.NormSq() == 0.0f) {
+    vec =
+        Vec3(2 * RandomReal() - 1, 2 * RandomReal() - 1, 2 * RandomReal() - 1);
+  }
+  return vec;
+}
+
+Vec3 RandomUnitVector() {
+  Vec3 vec = RandomVectorInUnitBall();
+  return vec.NormalizedNonzero();
+}
+
+Vec2 RandomVectorInUnitDisk() {
+  float x = 1.0f;
+  float y = 1.0f;
+  while (x * x + y * y >= 1.0f) {
+    x = RandomReal() * 2.0f - 1.0f;
+    y = RandomReal() * 2.0f - 1.0f;
+  }
+  return Vec2(x, y);
 }
