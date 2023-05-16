@@ -8,7 +8,8 @@ class Tester {
  public:
     bool TestRandomness();
     bool TestColors();
-    bool TestLorentzTransforms();
+    bool TestLineLorentzTransforms();
+    bool TestColorLorentzTransforms();
     bool TestIntersections();
     bool RunAllTests();
 };

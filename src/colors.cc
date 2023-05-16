@@ -320,7 +320,7 @@ Spectrum &Spectrum::Rescale(float amplitude_factor, float scale_factor) {
 
 Spectrum Spectrum::Rescaled(float amplitude_factor, float scale_factor) const {
   std::vector<GaussianData> modes(getModes());
-  for (auto mode : modes) {
+  for (auto &mode : modes) {
     mode.Rescale(amplitude_factor, scale_factor);
   }
   return Spectrum(modes);
@@ -341,6 +341,8 @@ rgbData SpectrumTransform::ColorFrom(const Spectrum &spectrum) const {
   // The products calculated along the way are stored
   // in the iterative_absorption_mode_buffer.
 
+
+  // Create absorption buffer representing A
   XYZData color;
   std::vector<GaussianData> iterative_absorption_mode_buffer;
   for (const Spectrum absorption : camera_frame_absorbtions_) {
@@ -355,7 +357,8 @@ rgbData SpectrumTransform::ColorFrom(const Spectrum &spectrum) const {
     }
   }
 
-  for (auto em_mode : spectrum.getModes()) {
+  // Rescale emission according to transform, then compute resulting color.
+  for (auto em_mode : spectrum.Rescaled(brightness_, wavelength_rescale_).getModes()) {
     color += em_mode.Color();
     for (auto ab_mode : iterative_absorption_mode_buffer) {
       color -= (em_mode * ab_mode).Color();

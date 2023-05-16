@@ -136,16 +136,38 @@ bool Tester::TestRandomness() {
   float first_moment_4_normSq =
       first_moment_4.x * first_moment_4.x + first_moment_4.y * first_moment_4.y;
   second_moment_4 = second_moment_4 / kSampleSize;
-  float std_dev_4 = sqrtf(second_moment_4 - first_moment_4_normSq);
 
   std::cout << "Generated " << kSampleSize << " random unit vectors."
             << std::endl
             << "Mean: (" << first_moment_4.x << ", " << first_moment_4.y << ")"
             << std::endl
-            << "Standard deviation: " << std_dev_4 << std::endl;
+            << "Mean norm squared: " << second_moment_4 << std::endl;
 
   std::cout << "---" << std::endl;
   std::cout << "Tests completed successfully." << std::endl;
+
+  /* PASSED: Test Lambertian scattering
+  // (avg should give -2/3 along chosen norm, avg_normsq should be 1)
+  std::vector<Vec3> l_scatters;
+  const int nr_scatters = 10000;
+  l_scatters.reserve(nr_scatters);
+  std::mt19937 r_gen(42);
+  for (int i = 0; i < nr_scatters; i++) {
+    l_scatters.push_back(
+        LambertianScatter::LambertianInverseRay(Vec3(1, 0, 0), &r_gen));
+  }
+  Vec3 avg = std::reduce(l_scatters.cbegin(), l_scatters.cend(), kZero3) /
+             static_cast<float>(nr_scatters);
+  float avg_normsq = 0;
+  std::for_each(l_scatters.cbegin(), l_scatters.cend(),
+                [&avg_normsq](Vec3 vec) { avg_normsq += vec.NormSq(); });
+  avg_normsq /= nr_scatters;
+  std::cout << "Lambert scatter: "
+            << "avg: " << avg << " "
+            << "normsq: " << avg_normsq << " "
+            << std::endl;
+  */
+
   return true;
 }
 
@@ -331,8 +353,8 @@ bool Tester::TestColors() {
         // place white tick
         test_image.set_pixel(x, y, 0, 0, 0);
       } else {
-        // place actual color: emission at lambda_emit, absorption at
-        // lambda_absorb
+        // place actual color: dim white with absorption at
+        // lambda_x and lambda_y in parallel
         Spectrum absorption({GaussianData(narrowband_amplitude, lambda_absorb_x,
                                           absorptionband_sig),
                              GaussianData(narrowband_amplitude, lambda_absorb_y,
@@ -367,8 +389,8 @@ bool Tester::TestColors() {
         // place white tick
         test_image.set_pixel(x, y, 0, 0, 0);
       } else {
-        // place actual color: emission at lambda_emit, absorption at
-        // lambda_absorb
+        // place actual color: dim white with absorption at
+        // lambda_x and lambda_y in series
         Spectrum absorption1(GaussianData(narrowband_amplitude, lambda_absorb_x,
                                           absorptionband_sig));
         Spectrum absorption2(GaussianData(narrowband_amplitude, lambda_absorb_y,
@@ -390,90 +412,273 @@ bool Tester::TestColors() {
   return true;
 }
 
-bool Tester::TestLorentzTransforms() {}
-
-bool Tester::TestIntersections() {}
-
-bool Tester::RunAllTests() { return TestRandomness() && TestColors(); }
-
-/* PASSED: Test Lambertian scattering
-// (avg should give -2/3 along chosen norm, avg_normsq should be 1)
-std::vector<Vec3> l_scatters;
-const int nr_scatters = 10000;
-l_scatters.reserve(nr_scatters);
-std::mt19937 r_gen(42);
-for (int i = 0; i < nr_scatters; i++) {
-  l_scatters.push_back(
-      LambertianScatter::LambertianInverseRay(Vec3(1, 0, 0), &r_gen));
+float kMaxEntry = 1e2;
+Vec4 RandomPos4() {
+  return kMaxEntry * Vec4(2 * RandomReal() - 1, 2 * RandomReal() - 1,
+                          2 * RandomReal() - 1, 2 * RandomReal() - 1);
 }
-Vec3 avg = std::reduce(l_scatters.cbegin(), l_scatters.cend(), kZero3) /
-           static_cast<float>(nr_scatters);
-float avg_normsq = 0;
-std::for_each(l_scatters.cbegin(), l_scatters.cend(),
-              [&avg_normsq](Vec3 vec) { avg_normsq += vec.NormSq(); });
-avg_normsq /= nr_scatters;
-std::cout << "Lambert scatter: "
-          << "avg: " << avg << " "
-          << "normsq: " << avg_normsq << " "
-          << std::endl;
-*/
 
-/* PASSED: Line transformation test
-Line testline1 = Line(Vec4(0,1,2,3), Vec3(-0.5,0.5,0.5));
-Line testline2 = Line(Vec4(-1,11,-2,5), Vec3(0.5,-0.5,0.5));
-std::cout << "Line 1 in frame 0: " << testline1 << std::endl;
-std::cout << "Line 1 in frame 1: " << testline1.in_frame(testline1) <<
-std::endl; std::cout << "Line 1 in frame 0: " <<
-testline1.in_frame(testline1).TransformedFromFrame(testline1) << std::endl;
-std::cout << "Line 1 in frame 2: " << testline1.in_frame(testline2) <<
-std::endl; std::cout
-<< "Line 2 in frame 0: " << testline2 << std::endl; std::cout << "Line 2 in
-frame 1: " << testline2.in_frame(testline1) << std::endl; std::cout << "Line 2
-in frame 0: " << testline2.in_frame(testline1).TransformedFromFrame(testline1)
-<< std::endl; std::cout << "Line 2 in frame 2: " <<
-testline2.in_frame(testline2)
-<< std::endl;
-*/
-
-/* PASSED: Image Line inspection
-LineList img_rays = cam.ImageRays();
-std::cout << "Number of rays: " << img_rays.size() << std::endl;
-for (Line r : img_rays) {
-  std::printf(
-      "origin: (%1.1f, %1.1f, %1.1f, %1.1f) vel: (%1.1f, %1.1f, %1.1f)\n",
-      r.origin.t, r.origin.r.x, r.origin.r.y, r.origin.r.z,
-      r.vel.x, r.vel.y, r.vel.z);
+Vec3 RandomVel3() {
+  // Random vector in unit ball, heavily biased towards centre
+  return RandomVectorInUnitBall() * RandomReal() * RandomReal();
 }
-*/
 
-/* PASSED: Basic sphere test
-std::cout << "Sphere intersection test: " << std::endl;
-LineList test_rays{Line(kZero4, xvel),
-                  Line(Vec4(0, 0, 0.9, 0), xvel),
-                  Line(Vec4(0, 0, 0, 0.9), xvel),
-                  Line(Vec4(0, 0, -0.9, 0), xvel),
-                  Line(Vec4(0, 0, 0, -0.9), xvel),
-                  Line(Vec4(0, 0, 1.1, 0), xvel),
-                  Line(Vec4(0, 0, 0, 1.1), xvel),
-                  Line(Vec4(0, 0, -1.1, 0), xvel),
-                  Line(Vec4(0, 0, 0, -1.1), xvel),
-                  };
+float EuclNormSq4(Vec4 vec) { return vec.SpaceNormSq() + vec.t * vec.t; }
 
-for (Line ray : test_rays) {
-  printf("Test Line (y,z) = (%1.1f, %1.1f) in x-direction ",
-         ray.origin.r.y, ray.origin.r.z);
-  if (s.intersect(ray)) {
-    printf("hits.");
-  } else {
-    printf("doesn't hit.");
+bool Tester::TestLineLorentzTransforms() {
+  float kTestEpsilon = 1e-6;
+
+  std::cout << "Testing 4-line transformations: " << std::endl
+            << "----" << std::endl;
+  std::cout << "Transform to-and-from:" << std::endl;
+  Vec4 o = RandomPos4();
+  Vec3 v = RandomVel3();
+
+  Vec4 rf_o = RandomPos4();
+  Vec3 rf_v = RandomVel3();
+
+  Line l(o, v);
+  Line rf(rf_o, rf_v);
+  std::cout << "Random line:" << l << std::endl;
+  std::cout << "Random reference frame worldline rf: " << rf << std::endl;
+
+  Line l_l = l.TransformedToFrame(l);
+  Line l_rf = l.TransformedToFrame(rf);
+  Line l_rf_0 = l_rf.TransformedFromFrame(rf);
+  std::cout << "Line in its own rest frame: " << l_l << std::endl
+            << "Line in reference frame rf: " << l_rf << std::endl
+            << "Line transformed back to standard frame: " << l_rf_0
+            << std::endl;
+
+  // A line should be at rest at origin in its rest frame.
+  float eucl_normSq = EuclNormSq4(l_l.origin);
+  float vel_normSq = l_l.vel.NormSq();
+  if (eucl_normSq > kTestEpsilon) {
+    std::cout << "Line not at origin in its rest frame!" << std::endl;
+    return false;
   }
-  printf("\n");
+  if (vel_normSq > kTestEpsilon) {
+    std::cout << "Line not at rest in its rest frame!" << std::endl;
+    return false;
+  }
+  if (EuclNormSq4(l.origin - l_rf_0.origin) >
+          kTestEpsilon * EuclNormSq4(l.origin) ||
+      (l.vel - l_rf_0.vel).NormSq() > kTestEpsilon * l.vel.NormSq()) {
+    std::cout << "Line does not return to original value under to-and-from "
+                 "transformation."
+              << std::endl;
+    return false;
+  }
+
+  std::cout << "----" << std::endl;
+  std::cout << "Check transform transitivity:" << std::endl;
+  o = RandomPos4();
+  v = RandomVel3();
+  Vec4 o1 = RandomPos4();
+  Vec3 v1 = RandomVel3();
+  Vec4 o2 = RandomPos4();
+  Vec3 v2 = RandomVel3();
+
+  l = Line(o, v);
+  Line rf1(o1, v1);
+  Line rf2(o2, v2);
+
+  std::cout << "Random line: " << l << std::endl;
+  std::cout << "Random rf worldlines: " << std::endl
+            << "rf1: " << rf1 << std::endl
+            << "rf2: " << rf2 << std::endl;
+
+  Line l_1 = l.TransformedToFrame(rf1);
+  Line rf2_1 = rf2.TransformedToFrame(rf1);
+  Line l_1_2 = l_1.TransformedToFrame(rf2_1);
+  Line l_1_2_0 = l_1_2.TransformedFromFrame(rf2);
+
+  std::cout << "Line transformed to rf1: " << l_1 << std::endl
+            << "rf2 transformed to rf1: " << rf2_1 << std::endl
+            << "Line transformed to rf2 via rf1: " << l_1_2 << std::endl
+            << "Line transformed back to standard frame: " << l_1_2_0
+            << std::endl;
+
+  if (EuclNormSq4(l_1_2_0.origin - l.origin) >
+          kTestEpsilon * EuclNormSq4(l.origin) ||
+      (l_1_2_0.vel - l.vel).NormSq() > kTestEpsilon * l.vel.NormSq()) {
+    std::cout
+        << "Transitivity failed: line not preserved under round-trip."
+        << std::endl
+        << "This is likely a result of limited precision. Continuing tests."
+        << std::endl;
+  }
+  std::cout << "----" << std::endl;
+
+  return true;
 }
 
-*/
+bool Tester::TestColorLorentzTransforms() {
+  const float min_lambda = 0;  // nm
+  const float max_lambda = 1000;  // nm
+  const float d_lambda = 1;
+  const unsigned int lambda_side = (max_lambda - min_lambda) / d_lambda;
 
-int main() {
-  Tester test;
+  const float standard_lambda = (max_lambda + min_lambda) / 2.0f;  // nm
 
-  return test.RunAllTests();
+  const float narrowband_sig = 0.5f;        // nm
+  const float narrowband_amplitude = 1.0f;  // nm
+  const float absorptionband_sig = 50.0f;
+
+  const float rescale_factor = 255.0f;
+
+  const float min_speed = -1.0f;
+  const float max_speed = 1.0f;
+  const float d_speed = 4e-3f;
+  const unsigned int speed_side = (max_speed - min_speed) / d_speed;
+
+  const float min_angle = -kPi;
+  const float max_angle = kPi;
+  const float d_angle = kPi / 800.0f;
+  const unsigned int angle_side = (max_angle - min_angle) / d_angle;
+
+  Spectrum super_dim_white_emission(kWhite * 0.01);
+  Vec3 ray_vel(-1, 0, 0);
+  SpectrumTransform no_transform;
+
+  std::string filename1 = "images/lambda_speed.bmp";
+  std::string filename2 = "images/angle_speed.bmp";
+  std::string filename3 = "images/absorb_speed_abframe.bmp";
+  std::string filename4 = "images/absorb_speed_stdframe.bmp";
+
+  std::cout << "Testing light transforms: " << std::endl;
+  std::cout << "----" << std::endl;
+  std::cout << "Varying wavelength and relative speed: " << std::endl;
+
+  BitmapImage test_image(lambda_side, speed_side);
+  for (int y = 0; y < speed_side; y++) {
+    float speed = min_speed + d_speed * y;
+    Vec3 frame_vel = ray_vel * speed;
+    for (int x = 0; x < lambda_side; x++) {
+      float lambda = min_lambda + d_lambda * x;
+
+      if (static_cast<int>(floorf(lambda)) % 100 < d_lambda) {
+        // place white tick
+        test_image.set_pixel(x, y, 255, 255, 255);
+      } else {
+        // place actual color:
+        // lambda, sent from source with relative speed
+        Spectrum emission(
+            GaussianData(narrowband_amplitude, lambda, narrowband_sig));
+        SpectrumTransform new_transform(no_transform);
+        new_transform.ApplyTransformationFromFrame(ray_vel, frame_vel);
+        RGBData pixel_RGB =
+            new_transform.ColorFrom(emission).ToRGB(rescale_factor);
+        test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+      }
+    }
+  }
+
+  std::cout << "Outputting to " << filename1 << "." << std::endl;
+  test_image.save_image(filename1);
+
+  std::cout << "----" << std::endl;
+  std::cout << "Varying relative angle and speed: " << std::endl;
+  std::cout << "Emitting narrow band beam with wavelength of "
+            << standard_lambda << " nm" << std::endl;
+
+  test_image = BitmapImage(angle_side, speed_side);
+
+  for (int y = 0; y < speed_side; y++) {
+    float speed = min_speed + d_speed * y;
+    for (int x = 0; x < angle_side; x++) {
+      float angle = min_angle + d_angle * x;
+      Vec3 frame_vel = speed * Vec3(cosf(angle), sinf(angle), 0);
+
+      // place actual color:
+      // standard_lambda, sent from source with specified relative speed and
+      // angle
+      Spectrum emission(
+          GaussianData(narrowband_amplitude, standard_lambda, narrowband_sig));
+      SpectrumTransform new_transform(no_transform);
+      new_transform.ApplyTransformationFromFrame(ray_vel, frame_vel);
+      RGBData pixel_RGB =
+          new_transform.ColorFrom(emission).ToRGB(rescale_factor);
+      test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+    }
+  }
+
+  std::cout << "Outputting to " << filename2 << "." << std::endl;
+  test_image.save_image(filename2);
+
+  std::cout << "----" << std::endl;
+  std::cout << "Varying absorption wavelength and speed, "
+            << "assuming emission happens in same frame as absorption:" << std::endl;
+
+  test_image = BitmapImage(lambda_side, speed_side);
+
+  for (int y = 0; y < speed_side; y++) {
+    float speed = min_speed + d_speed * y;
+    Vec3 frame_vel = ray_vel * speed;
+    for (int x = 0; x < angle_side; x++) {
+      float lambda = min_lambda + d_lambda * x;
+
+      if (static_cast<int>(floorf(lambda)) % 100 < d_lambda) {
+        // place white tick
+        test_image.set_pixel(x, y, 0, 0, 0);
+      } else {
+        // place actual color:
+        // super dim white experiencing absorption at specified relative speed
+        Spectrum absorption(
+            GaussianData(narrowband_amplitude, lambda, absorptionband_sig));
+        SpectrumTransform new_transform(no_transform);
+        new_transform.ApplyTransformationFromFrame(ray_vel, frame_vel);
+        new_transform.ApplyAbsorption(absorption);
+
+        RGBData pixel_RGB = new_transform.ColorFrom(super_dim_white_emission)
+                                .ToRGB(rescale_factor);
+        test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+      }
+    }
+  }
+
+  std::cout << "Outputting to " << filename3 << "." << std::endl;
+  test_image.save_image(filename3);
+
+  std::cout << "----" << std::endl;
+  std::cout << "Varying absorption wavelength and speed, "
+            << "assuming emission happens in standard frame:" << std::endl;
+
+  test_image = BitmapImage(lambda_side, speed_side);
+
+  for (int y = 0; y < speed_side; y++) {
+    float speed = min_speed + d_speed * y;
+    Vec3 frame_vel = ray_vel * speed;
+    for (int x = 0; x < angle_side; x++) {
+      float lambda = min_lambda + d_lambda * x;
+
+      if (static_cast<int>(floorf(lambda)) % 100 < d_lambda) {
+        // place white tick
+        test_image.set_pixel(x, y, 0, 0, 0);
+      } else {
+        // place actual color:
+        // super dim white experiencing absorption at specified relative speed
+        Spectrum absorption(
+            GaussianData(narrowband_amplitude, lambda, absorptionband_sig));
+        SpectrumTransform new_transform(no_transform);
+        new_transform.ApplyTransformationFromFrame(ray_vel, frame_vel);
+        new_transform.ApplyAbsorption(absorption);
+        new_transform.ApplyTransformationToFrame(ray_vel, frame_vel);
+
+        RGBData pixel_RGB = new_transform.ColorFrom(super_dim_white_emission)
+                                .ToRGB(rescale_factor);
+        test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
+      }
+    }
+  }
+
+  std::cout << "Outputting to " << filename4 << "." << std::endl;
+  test_image.save_image(filename4);
+
+  return true;
+}
+
+bool Tester::RunAllTests() {
+  return TestRandomness() && TestColors() && TestLineLorentzTransforms() &&
+         TestColorLorentzTransforms();
 }
