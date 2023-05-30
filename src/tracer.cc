@@ -53,7 +53,8 @@ float MaxValue(const std::vector<rgbData> &rgb_array) {
 // Verbosely renders an image with the given parameters.
 bool Tracer::RenderImage(int rays_per_pixel, int depth, int camera_index,
                          int iterations_per_update, std::string filename,
-                         float camera_time) const {
+                         float camera_time, float rescale_factor,
+                         bool output_normalised_render) const {
   // --------------------------------------------
   //    SETUP
   // --------------------------------------------
@@ -63,8 +64,11 @@ bool Tracer::RenderImage(int rays_per_pixel, int depth, int camera_index,
 
   LineList image_rays = camera.ImageRays(camera_time);
 
-  float rescale_factor = EstimateRescaleFactor(&image_rays, kRescaleFactorRays,
-                                               camera.GetVelocity());
+  bool estimate_rescale_factor = rescale_factor < 0.0f;
+  if (estimate_rescale_factor) {
+    rescale_factor = EstimateRescaleFactor(
+        &image_rays, depth, camera.GetVelocity(), kRescaleFactorRays);
+  }
 
   // Create array which we fill with the rgb values. We need this in order
   // to normalise them before converting them into RGB.
@@ -81,7 +85,12 @@ bool Tracer::RenderImage(int rays_per_pixel, int depth, int camera_index,
   std::cout << "Rendering scene with:" << std::endl;
   std::cout << "depth: " << depth << ", rays per pixel:" << rays_per_pixel
             << std::endl;
-  printf("Estimated rescale factor: %1.2f\n", rescale_factor);
+  std::cout << "Rescale factor: " << rescale_factor;
+  if (estimate_rescale_factor) {
+    std::cout << " (estimated)";
+  }
+  std::cout << std::endl;
+
   std::cout << "Output to file " << live_filename << " every "
             << iterations_per_update << " iterations." << std::endl;
   std::cout << "Starting render." << std::endl;
@@ -98,6 +107,9 @@ bool Tracer::RenderImage(int rays_per_pixel, int depth, int camera_index,
     }
   }
 
+  if (!output_normalised_render) {
+    return EXIT_SUCCESS;
+  }
   // --------------------------------------------
   //    COLOR-CORRECTED RENDER
   // --------------------------------------------
@@ -116,7 +128,10 @@ bool Tracer::RenderImage(int rays_per_pixel, int depth, int camera_index,
 */
 bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
                         int iterations_per_update, std::string filename,
-                        float start_time, float end_time, float d_time) const {
+                        float start_time, float end_time, float d_time,
+                        int start_frame, int end_frame, bool preview_only,
+                        float rescale_factor,
+                        bool output_normalised_renders) const {
   // --------------------------------------------
   //    SETUP
   // --------------------------------------------
@@ -124,28 +139,38 @@ bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
   unsigned int width = camera.GetScreenWidth();
   unsigned int height = camera.GetScreenHeight();
 
-  const int frames = (end_time - start_time) / d_time;
+  const int frames = (end_time - start_time) / d_time + 1;
 
-  // Estimate rescale factor
-  float rescale_factor = 0.0f;
-  for (int estimator_frame = 0; estimator_frame < frames; estimator_frame++) {
-    float estimator_time = start_time + d_time * estimator_frame;
-    LineList image_rays = camera.ImageRays(estimator_time);
-    rescale_factor += EstimateRescaleFactor(&image_rays, kRescaleFactorRays,
-                                            camera.GetVelocity());
+  int last_frame = frames;
+  if (end_frame != -1) {
+    last_frame = end_frame;
   }
-  rescale_factor /= frames;
+
+  bool estimate_rescale_factor = rescale_factor < 0.0f;
+  if (estimate_rescale_factor) {
+    // Estimate rescale factor
+    rescale_factor = 0.0f;
+    for (int estimator_frame = start_frame; estimator_frame < last_frame;
+         estimator_frame++) {
+      float estimator_time = start_time + d_time * estimator_frame;
+      LineList image_rays = camera.ImageRays(estimator_time);
+      rescale_factor += EstimateRescaleFactor(
+          &image_rays, depth, camera.GetVelocity(), kRescaleFactorRays);
+    }
+    rescale_factor /= last_frame - start_frame;
+    std::cout << "Estimated rescale factor: " << rescale_factor << std::endl;
+  }
 
   // --------------------------------------------
   //    PREVIEW STAGE
   // --------------------------------------------
   // Quickly render a preview of each frame
   const int preview_rays_per_pixel = 1;
-  const int preview_depth = 3;
+  const int preview_depth = 5;
 
   const int frame_digits = static_cast<int>(std::floor(std::log10(frames))) + 1;
 
-  std::cout << "Outputting preview images to vidframes/ " << filename << "_XXX."
+  std::cout << "Outputting preview images to vidframes/" << filename << "_XXX."
             << std::endl;
 
   // Create array which we fill with the rgb values. We need this in order
@@ -154,7 +179,8 @@ bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
   rgb_array.assign(width * height, rgbData(0, 0, 0));
 
   // Loop through preview frames
-  for (int preview_frame = 0; preview_frame < frames; preview_frame++) {
+  for (int preview_frame = start_frame; preview_frame < last_frame;
+       preview_frame++) {
     float preview_time = start_time + d_time * preview_frame;
     std::string preview_filename = AssembleFilename(
         "vidframes/", filename, preview_frame, frame_digits, ".bmp");
@@ -167,22 +193,33 @@ bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
     std::cout << "Finished preview frame " << preview_frame + 1 << "."
               << std::endl;
   }
-  std::cout << "---------------------------------" << std::endl
-            << "Starting render." << std::endl;
+  std::cout << "---------------------------------" << std::endl;
+
+  if (preview_only) {
+    std::cout << "Program was run with preview_only. Done." << std::endl;
+    return EXIT_SUCCESS;
+  }
 
   // --------------------------------------------
   //    LIVE RENDER
   // --------------------------------------------
+  std::cout << "Starting render." << std::endl;
   std::cout << "Rendering scene with:" << std::endl;
   std::cout << "depth: " << depth << ", rays per pixel:" << rays_per_pixel
             << std::endl;
-  std::printf("Estimated rescale factor: %1.2f\n", rescale_factor);
+
+  std::cout << "Rescale factor: " << rescale_factor;
+  if (estimate_rescale_factor) {
+    std::cout << " (estimated)";
+  }
+  std::cout << std::endl;
+
   std::cout << "Updating files every " << iterations_per_update
             << " iterations." << std::endl;
-  for (int frame = 0; frame < frames; frame++) {
+  for (int frame = start_frame; frame < last_frame; frame++) {
     float camera_time = start_time + d_time * frame;
     std::string complete_filename =
-        AssembleFilename("vidframes/", filename, frames, frame_digits, ".bmp");
+        AssembleFilename("vidframes/", filename, frame, frame_digits, ".bmp");
 
     for (int iteration = 0; iteration < rays_per_pixel; iteration++) {
       // refresh image rays
@@ -191,7 +228,8 @@ bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
       UpdateFrame(image_rays, depth, camera.GetVelocity(), iteration,
                   rgb_array);
 
-      if ((iteration + 1) % iterations_per_update == 0) {
+      if ((iteration + 1) % iterations_per_update == 0 ||
+          iteration + 1 == rays_per_pixel) {
         OutputImage(width, height, rgb_array, rescale_factor,
                     complete_filename);
         std::cout << "Frame " << frame << " iteration " << (iteration + 1)
@@ -199,34 +237,37 @@ bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
       }
     }
 
-    // --------------------------------------------
-    //    COLOR-CORRECTED RENDER
-    // --------------------------------------------
-    // Perform normalised render:
-    // Find the maximum rgb value, compute normalised RGB and output.
-    std::cout << "Normalising frame " << frame << ".";
-    float frame_rescale_factor = 255.0f / MaxValue(rgb_array);
-    OutputImage(width, height, rgb_array, frame_rescale_factor,
-                AssembleFilename("vidframes/", "n_" + filename, frame,
-                                 frame_digits, ".bmp"));
-    std::cout << "Done." << std::endl
-              << "---------------------------------" << std::endl;
+    if (output_normalised_renders) {
+      // --------------------------------------------
+      //    COLOR-CORRECTED RENDER
+      // --------------------------------------------
+      // Perform normalised render:
+      // Find the maximum rgb value, compute normalised RGB and output.
+      std::cout << "Normalising frame " << frame << ".";
+      float frame_rescale_factor = 255.0f / MaxValue(rgb_array);
+      OutputImage(width, height, rgb_array, frame_rescale_factor,
+                  AssembleFilename("vidframes/", "n_" + filename, frame,
+                                   frame_digits, ".bmp"));
+      std::cout << " Done." << std::endl
+                << "---------------------------------" << std::endl;
+    }
   }
 
   return EXIT_SUCCESS;
 }
 
 float Tracer::EstimateRescaleFactor(LineList *image_rays, int depth,
-                                    Vec3 camera_vel) const {
+                                    Vec3 camera_vel,
+                                    int estimation_rays) const {
   // Estimate color rescale factor from kRescaleFactorRays random rays.
   // We assume that the average brightness is 0.5.
   rgbData sample_color;
-  for (int sample = 0; sample < kRescaleFactorRays; sample++) {
+  for (int sample = 0; sample < estimation_rays; sample++) {
     Line sample_ray =
         image_rays->at(static_cast<int>(RandomReal() * image_rays->size()));
     sample_color += TraceRay(sample_ray, depth, camera_vel);
   }
-  sample_color /= kRescaleFactorRays;
+  sample_color /= estimation_rays;
   float max_value =
       std::max(sample_color.r, std::max(sample_color.g, sample_color.b));
   if (max_value > kDivisionEpsilon) {
@@ -269,7 +310,7 @@ rgbData Tracer::TraceRay(const Line &ray_0, int depth, Vec3 camera_vel) const {
 
     // extract hit data
     const Object *hit_obj = hit.obj;
-    MaterialPtr mat = hit_obj->GetMaterial();
+    const Material *mat = hit_obj->GetMaterial();
     const Line object_worldline = hit_obj->GetWorldline();
     const Vec3 object_velocity = hit_obj->GetVelocity();
     Vec4 ray_origin = hit.rf.pos.TransformedFromFrame(object_worldline);
@@ -281,10 +322,11 @@ rgbData Tracer::TraceRay(const Line &ray_0, int depth, Vec3 camera_vel) const {
     // apply color data
     color += cumulative_transform.ColorFrom(mat->EmissionSpectrum(hit.rf));
     cumulative_transform.ApplyAbsorption(mat->AbsorptionCurve(hit.rf));
+
     // de-scatter
     ScatterData scatter_data =
         mat->InverseScatter(hit.rf, cumulative_transform);
-    Vec3 ray_vel = scatter_data.vel_.TransformedFromFrame(object_velocity);
+    Vec3 ray_vel = scatter_data.vel_.VelTransformedFromFrame(object_velocity);
     ray = Line(ray_origin, ray_vel);
     cumulative_transform.ApplyTransformationToFrame(ray_vel, object_velocity);
   }

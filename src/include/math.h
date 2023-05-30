@@ -36,8 +36,8 @@ struct Vec3 {
   float GammaInv() const;
   float Gamma() const;
 
-  Vec3 TransformedToFrame(const Vec3 &) const;
-  Vec3 TransformedFromFrame(const Vec3 &) const;
+  Vec3 VelTransformedToFrame(const Vec3 &) const;
+  Vec3 VelTransformedFromFrame(const Vec3 &) const;
 
   Vec3 Reflect(const Vec3 &) const;
 };
@@ -96,6 +96,9 @@ struct Line {
 
   Line(Vec4 _origin, Vec3 _vel) : origin(_origin), vel(_vel) {}
   friend std::ostream &operator<<(std::ostream &, const Line &);
+
+  Line operator+(Vec4 delta);
+  Line operator-(Vec4 delta);
 
   Vec4 PosAfter(float delta_time) const;
   Vec4 PosAt(float time) const;

@@ -5,6 +5,8 @@
 #include <iostream>
 #include <random>
 
+#include "math.h"
+
 /*
     3-vector lib
 */
@@ -106,20 +108,21 @@ float Vec3::GammaInv() const {
   return sqrtf(1 - NormSq());
 }
 
-// TODO(c): build in check that vel is sub-lightspeed
-Vec3 Vec3::TransformedToFrame(const Vec3 &vel) const {
+// Transform velocity. 
+// Rf velocity is assumed to be sub-lightspeed(!)
+Vec3 Vec3::VelTransformedToFrame(const Vec3 &vel) const {
   float gamma = vel.Gamma();
   float prod = Dot3(vel);
   return 1 / (1 - prod) *
          (*this / gamma - vel + gamma / (gamma + 1) * prod * vel);
 }
 
-Vec3 Vec3::TransformedFromFrame(const Vec3 &vel) const {
-  return TransformedToFrame(-vel);
+Vec3 Vec3::VelTransformedFromFrame(const Vec3 &vel) const {
+  return VelTransformedToFrame(-vel);
 }
 
-// Reflects vector in plane given the normal vector
-// TODO(c): normalise `normal`?
+// Reflects vector in plane given a normal vector
+// Normal is presumed to be normalised!
 Vec3 Vec3::Reflect(const Vec3 &normal) const {
   return *this - 2 * Dot3(normal) * normal;
 }
@@ -199,6 +202,10 @@ std::ostream &operator<<(std::ostream &out, const Line &line) {
   return out << "{o:" << line.origin << ", v:" << line.vel << "}";
 }
 
+Line Line::operator+(Vec4 delta) { return Line(origin + delta, vel); }
+
+Line Line::operator-(Vec4 delta) { return Line(origin - delta, vel); }
+
 Vec4 Line::PosAfter(float delta_time) const {
   return Vec4(origin.t + delta_time, origin.r + vel * delta_time);
 }
@@ -207,7 +214,7 @@ Vec4 Line::PosAt(float time) const { return PosAfter(time - origin.t); }
 
 Line Line::TransformedToFrame(const Vec3 &other_vel) const {
   return Line(origin.TransformedToFrame(other_vel),
-              vel.TransformedToFrame(other_vel));
+              vel.VelTransformedToFrame(other_vel));
 }
 
 Line Line::TransformedFromFrame(const Vec3 &other_vel) const {
@@ -216,12 +223,12 @@ Line Line::TransformedFromFrame(const Vec3 &other_vel) const {
 
 Line Line::TransformedToFrame(const Line &other) const {
   return Line(origin.TransformedToFrame(other),
-              vel.TransformedToFrame(other.vel));
+              vel.VelTransformedToFrame(other.vel));
 }
 
 Line Line::TransformedFromFrame(const Line &other) const {
   return Line(origin.TransformedFromFrame(other),
-              vel.TransformedFromFrame(other.vel));
+              vel.VelTransformedFromFrame(other.vel));
 }
 
 /*

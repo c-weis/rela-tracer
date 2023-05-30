@@ -9,6 +9,12 @@
 #include "include/math.h"
 
 /*
+  ABSORPTION THINGS
+*/
+const float kAbsorptionThreshold =
+    1e-2;  // disregard absorption modes with area below this threshold
+
+/*
   GAUSSIAN THINGS
 */
 
@@ -254,8 +260,10 @@ std::vector<GaussianData> Spectrum::getModes() const {
   return modes;
 }
 
+size_t Spectrum::size() const { return modes_.size(); }
+
 Spectrum &Spectrum::operator+=(const Spectrum &other) {
-  for (GaussianData mode : other.getModes()) {
+  for (const GaussianData &mode : other.getModes()) {
     modes_.push_back(mode.Rescaled(other.amplitude_factor_ / amplitude_factor_,
                                    other.scale_factor_ / scale_factor_));
   }
@@ -312,7 +320,7 @@ Spectrum BlackBodyRadiation(float T, float amplitude_rescale) {
 }
 
 Spectrum &Spectrum::Rescale(float amplitude_factor, float scale_factor) {
-  for (auto mode : modes_) {
+  for (GaussianData &mode : modes_) {
     mode.Rescale(amplitude_factor, scale_factor);
   }
   return *this;
@@ -320,7 +328,7 @@ Spectrum &Spectrum::Rescale(float amplitude_factor, float scale_factor) {
 
 Spectrum Spectrum::Rescaled(float amplitude_factor, float scale_factor) const {
   std::vector<GaussianData> modes(getModes());
-  for (auto &mode : modes) {
+  for (GaussianData &mode : modes) {
     mode.Rescale(amplitude_factor, scale_factor);
   }
   return Spectrum(modes);
@@ -341,26 +349,33 @@ rgbData SpectrumTransform::ColorFrom(const Spectrum &spectrum) const {
   // The products calculated along the way are stored
   // in the iterative_absorption_mode_buffer.
 
-
   // Create absorption buffer representing A
   XYZData color;
   std::vector<GaussianData> iterative_absorption_mode_buffer;
-  for (const Spectrum absorption : camera_frame_absorbtions_) {
+  for (const Spectrum &absorption : camera_frame_absorptions_) {
     std::vector<GaussianData> old_modes(iterative_absorption_mode_buffer);
 
-    for (const GaussianData new_absorption_mode : absorption.getModes()) {
+    for (const GaussianData &new_absorption_mode : absorption.getModes()) {
+      // speed-up: skip low-absorption modes
+      if (abs(new_absorption_mode.amplitude * new_absorption_mode.sig) <
+          kAbsorptionThreshold)
+        continue;
+
       iterative_absorption_mode_buffer.push_back(new_absorption_mode);
-      for (GaussianData old_mode : old_modes) {
-        iterative_absorption_mode_buffer.push_back(
-            old_mode * new_absorption_mode.Rescaled(-1.0f, 1.0f));
+      for (const GaussianData &old_mode : old_modes) {
+        GaussianData mode =
+            old_mode * new_absorption_mode.Rescaled(-1.0f, 1.0f);
+        if (abs(mode.amplitude * mode.sig < kAbsorptionThreshold)) continue;
+        iterative_absorption_mode_buffer.push_back(mode);
       }
     }
   }
 
   // Rescale emission according to transform, then compute resulting color.
-  for (auto em_mode : spectrum.Rescaled(brightness_, wavelength_rescale_).getModes()) {
+  for (const GaussianData &em_mode :
+       spectrum.Rescaled(brightness_, wavelength_rescale_).getModes()) {
     color += em_mode.Color();
-    for (auto ab_mode : iterative_absorption_mode_buffer) {
+    for (const GaussianData &ab_mode : iterative_absorption_mode_buffer) {
       color -= (em_mode * ab_mode).Color();
     }
   }
@@ -372,7 +387,10 @@ SpectrumTransform &SpectrumTransform::ApplyAbsorption(const Spectrum &absorb) {
   // Add the absorption spectrum, transformed to camera frame.
   // Note it specifies a *fraction* as a function of wavelength,
   // so its amplitude transforms trivially.
-  camera_frame_absorbtions_.push_back(
+  if (absorb.size() == 0) {
+    return *this;
+  }  // else
+  camera_frame_absorptions_.push_back(
       absorb.Rescaled(1.0f, wavelength_rescale_));
 
   return *this;
@@ -470,206 +488,3 @@ XYZData GaussianData::Color() const {
   return XYZData((kCIEx1 * mode).Area() + (kCIEx2 * mode).Area(),
                  (kCIEy * mode).Area(), (kCIEz * mode).Area());
 }
-
-// ---------------------------------------------
-//   PIECEWISE GAUSSIAN THINGS
-// ---------------------------------------------
-
-/*
-// PWGaussianData contains parameters necessary to describe
-// a piecewise Gaussian function.
-struct PWGaussianData {
-  PWGaussianData(float _amplitude, float _mean, float _std_left,
-                 float _std_right)
-      : amplitude(_amplitude),
-        mean(_mean),
-        std_left(_std_left),
-        std_right(_std_right) {}
-  PWGaussianData(float amplitude, float mean, float std)
-      : PWGaussianData(amplitude, mean, std, std) {}
-
-  PWGaussianData Rescaled(float amplitude_factor, float scale_factor) const;
-  PWGaussianData &Rescale(float amplitude_factor, float scale_factor);
-
-  float amplitude;
-  float mean;
-  float std_left;
-  float std_right;
-};
-XYZData EmittedColor(PWGaussianData emission);
-XYZData AbsorbedColor(PWGaussianData emission, PWGaussianData absorption);
-*/
-
-/*
-float piecewise_gaussian_integral(float x, float a, float mu, float sig_l,
-                                  float sig_r) {
-  if (x < mu) {
-    return gaussian_integral(x, a, mu, sig_l);
-  }
-  return a * (sig_l - sig_r) * 0.5 + gaussian_integral(x, a, mu, sig_r);
-}
-*/
-
-/* old version: compute via variance, doesn't implement negative=infinity hack
-inline float product_mu(float mu1, float var1, float mu2, float var2) {
-  return (var2 * mu1 + var1 * mu2) / (var1 + var2);
-}
-
-inline float product_var(float var1, float var2) {
-  return (var1 * var2) / (var1 + var2);
-}
-*/
-
-/*
-    Compute XYZData from wavelength following
-    Wyman, Chris, Peter-Pike Sloan, and Peter Shirley.
-    "Simple analytic approximations to the CIE XYZ color
-    matching functions." J. Comput. Graph. Tech 2.2 (2013): 11.
-  */
-// THESE ARE WRONG:
-// const PWGaussianData kX1 = PWGaussianData(1.056f, 599.8f, 37.9f, 31.0f);
-// const PWGaussianData kX2 = PWGaussianData(0.362f, 442.0f, 16.0f, 26.7f);
-// const PWGaussianData kX3 = PWGaussianData(-0.065f, 501.1f, 20.4f, 26.2f);
-// const PWGaussianData kY1 = PWGaussianData(0.821f, 568.8f, 46.9f, 40.5f);
-// const PWGaussianData kY2 = PWGaussianData(0.286f, 530.9f, 16.3f, 31.1f);
-// const PWGaussianData kZ1 = PWGaussianData(1.217f, 437.0f, 11.8f, 36.0f);
-// const PWGaussianData kZ2 = PWGaussianData(0.681f, 459.0f, 26.0f, 13.8f);
-//
-// XYZData FromWavelength(float lambda) {
-//   return XYZData((1.056 * piecewise_gaussian(lambda, 1.0f, 599.8, 37.9, 31.0)
-//   +
-//                   0.362 * piecewise_gaussian(lambda, 1.0f, 442.0, 16.0, 26.7)
-//                   - 0.065 * piecewise_gaussian(lambda, 1.0f,
-//                   501.1, 20.4, 26.2)),
-//                  (0.821 * piecewise_gaussian(lambda, 1.0f, 568.8, 46.9, 40.5)
-//                  +
-//                   0.286 * piecewise_gaussian(lambda, 1.0f,
-//                   530.9, 16.3, 31.1)),
-//                  (1.217 * piecewise_gaussian(lambda, 1.0f, 437.0, 11.8, 36.0)
-//                  +
-//                   0.681 * piecewise_gaussian(lambda, 1.0f,
-//                   459.0, 26.0, 13.8)));
-// }
-/*
-float integrate_product(float a1, float mu1, float sig_l1, float sig_r1,
-                        float a2, float mu2, float sig_l2, float sig_r2) {
-  // make sure mu1 < mu2
-  if (mu1 > mu2) {
-    return integrate_product(a2, mu2, sig_l2, sig_r2, a1, mu1, sig_l1, sig_r1);
-  }
-
-  // The product of two piecewise Gaussians consists of three
-  // Gaussians stitched together at mu1 and mu2.
-  // Compute mu and sigma for the three sections,
-  // then evaluate the integrals.
-  float a = a1 * a2;
-
-  float mu_left = product_mu(mu1, sig_l1, mu2, sig_l2);
-  float sig_left = product_sig(sig_l1, sig_l2);
-  float a_left = a * product_amp_factor(mu1, sig_l1, mu2, sig_l2);
-
-  float mu_mid = product_mu(mu1, sig_r1, mu2, sig_l2);
-  float sig_mid = product_sig(sig_r1, sig_l2);
-  float a_mid = a * product_amp_factor(mu1, sig_r1, mu2, sig_l2);
-
-  float mu_right = product_mu(mu1, sig_r1, mu2, sig_r2);
-  float sig_right = product_sig(sig_r1, sig_r2);
-  float a_right = a * product_amp_factor(mu1, sig_r1, mu2, sig_r2);
-
-  float integral_left = gaussian_integral(mu1, a_left, mu_left, sig_left);
-  float integral_mid = gaussian_integral(mu2, a_mid, mu_mid, sig_mid) -
-                       gaussian_integral(mu1, a_mid, mu_mid, sig_mid);
-  float integral_right = gaussian_integral(-mu2, a_right, mu_right, sig_right);
-
-  return integral_left + integral_mid + integral_right;
-}
-
-float integrate_product(PWGaussianData gd1, PWGaussianData gd2) {
-  return integrate_product(gd1.amplitude, gd1.mean, gd1.std_left, gd1.std_right,
-                           gd2.amplitude, gd2.mean, gd2.std_left,
-                           gd2.std_right);
-}
-
-float integrate_product(float a1, float mu1, float sig_l1, float sig_r1,
-                        float a2, float mu2, float sig_l2, float sig_r2,
-                        float a3, float mu3, float sig_l3, float sig_r3) {
-  // make sure mu1 < mu2 < mu3 (bubble sort)
-  if (mu2 > mu3) {
-    return integrate_product(a1, mu1, sig_l1, sig_r1, a3, mu3, sig_l3, sig_r3,
-                             a2, mu2, sig_l2, sig_r2);
-  }
-  if (mu1 > mu2) {
-    return integrate_product(a2, mu2, sig_l2, sig_r2, a1, mu1, sig_l1, sig_r1,
-                             a3, mu3, sig_l3, sig_r3);
-  }
-
-  // The product of three piecewise Gaussians consists of four
-  // Gaussians stitched together at mu1, mu2 and mu3.
-  // Compute mu and sigma for the four sections,
-  // then evaluate the integrals.
-  float a = a1 * a2 * a3;
-
-  float mu12 = product_mu(mu1, sig_l1, mu2, sig_l2);
-  float sig12 = product_sig(sig_l1, sig_l2);
-  float amp12 = product_amp_factor(mu1, sig_l1, mu2, sig_l2);
-  float mu_left = product_mu(mu12, sig12, mu3, sig_l3);
-  float sig_left = product_sig(sig12, sig_l3);
-  float a_left = a * amp12 * product_amp_factor(mu12, sig12, mu3, sig_l3);
-
-  mu12 = product_mu(mu1, sig_r1, mu2, sig_l2);
-  sig12 = product_sig(sig_r1, sig_l2);
-  amp12 = product_amp_factor(mu1, sig_r1, mu2, sig_l2);
-  float mu_midleft = product_mu(mu12, sig12, mu3, sig_l3);
-  float sig_midleft = product_sig(sig12, sig_l3);
-  float a_midleft = a * amp12 * product_amp_factor(mu12, sig12, mu3, sig_l3);
-
-  mu12 = product_mu(mu1, sig_r1, mu2, sig_r2);
-  sig12 = product_sig(sig_r1, sig_r2);
-  amp12 = product_amp_factor(mu1, sig_r1, mu2, sig_r2);
-  float mu_midright = product_mu(mu12, sig12, mu3, sig_l3);
-  float sig_midright = product_sig(sig12, sig_l3);
-  float a_midright = a * amp12 * product_amp_factor(mu12, sig12, mu3, sig_l3);
-
-  float mu_right = product_mu(mu12, sig12, mu3, sig_r3);
-  float sig_right = product_sig(sig12, sig_r3);
-  float a_right = a * amp12 * product_amp_factor(mu12, sig12, mu3, sig_r3);
-
-  float integral_left = gaussian_integral(mu1, a_left, mu_left, sig_left);
-  float integral_midleft =
-      gaussian_integral(mu2, a_midleft, mu_midleft, sig_midleft) -
-      gaussian_integral(mu1, a_midleft, mu_midleft, sig_midleft);
-  float integral_midright =
-      gaussian_integral(mu3, a_midright, mu_midright, sig_midright) -
-      gaussian_integral(mu2, a_midright, mu_midright, sig_midright);
-  float integral_right = gaussian_integral(-mu3, a_right, mu_right, sig_right);
-
-  return integral_left + integral_midleft + integral_midright + integral_right;
-}
-
-float integrate_product(PWGaussianData gd1, PWGaussianData gd2,
-                        PWGaussianData gd3) {
-  return integrate_product(gd1.amplitude, gd1.mean, gd1.std_left, gd1.std_right,
-                           gd2.amplitude, gd2.mean, gd2.std_left, gd2.std_right,
-                           gd3.amplitude, gd3.mean, gd3.std_left,
-                           gd3.std_right);
-}
-*/
-
-//
-// XYZData EmittedColor(PWGaussianData emission) {
-//   return XYZData(
-//       integrate_product(kX1, emission) + integrate_product(kX2, emission) +
-//           integrate_product(kX3, emission),
-//       integrate_product(kY1, emission) + integrate_product(kY2, emission),
-//       integrate_product(kZ1, emission) + integrate_product(kZ2, emission));
-// }
-//
-// XYZData AbsorbedColor(PWGaussianData emission, PWGaussianData absorption) {
-//   return XYZData(integrate_product(kX1, emission, absorption) +
-//                      integrate_product(kX2, emission, absorption) +
-//                      integrate_product(kX3, emission, absorption),
-//                  integrate_product(kY1, emission, absorption) +
-//                      integrate_product(kY2, emission, absorption),
-//                  integrate_product(kZ1, emission, absorption) +
-//                      integrate_product(kZ2, emission, absorption));
-// }

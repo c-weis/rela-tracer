@@ -26,12 +26,15 @@ class Tracer {
 
   bool RenderImage(int rays_per_pixel = 5, int depth = 3, int camera_index = 0,
                    int iterations_per_update = 1, std::string filename = "",
-                   float camera_time = 0.0f) const;
+                   float camera_time = 0.0f, float rescale_factor = -1.0f, 
+                   bool output_normalised_render = true) const;
 
   bool RenderFilm(int rays_per_pixel = 5, int depth = 3, int camera_index = 0,
                   int iterations_per_update = 1, std::string filename = "",
                   float start_time = 0.0f, float end_time = 1.0f,
-                  float d_time = 0.1f) const;
+                  float d_time = 0.1f, int start_frame = 0, int end_frame = -1,
+                  bool preview_only = false, float rescale_factor = -1.0f, 
+                  bool output_normalised_renders = false) const;
 
  private:
   const Scene &scene_;
@@ -39,7 +42,7 @@ class Tracer {
   rgbData TraceRay(const Line &ray, int depth, Vec3 camera_vel) const;
 
   float EstimateRescaleFactor(LineList *image_rays, int depth,
-                              Vec3 camera_vel) const;
+                              Vec3 camera_vel, int estimation_rays) const;
 
   void UpdateFrame(const LineList &image_rays, int depth, Vec3 cam_vel,
                    int iteration, std::vector<rgbData> &pixel_rgb) const;

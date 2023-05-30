@@ -22,8 +22,8 @@ const float kTimeEpsilon = 5e-6f;
 // (counted in camera ref frame, from camera origin time)
 LineList Camera::ImageRays(float delta_t) const {
   float aspect = static_cast<float>(screen_width_) / screen_height_;
-  Vec3 central_line = screen_centre_;
-  Vec3 right = screen_right_;
+  Vec3 central_line = screen_center_.NormalizedNonzero();
+  Vec3 right = screen_center_to_right_;
   Vec3 down = Cross(central_line, right) / aspect;
 
   LineList rays;
@@ -36,9 +36,9 @@ LineList Camera::ImageRays(float delta_t) const {
       float x = -1.0f + (i + 0.5f + random_vec.x * 0.7071) * dx;
       float y = -1.0f + (j + 0.5f + random_vec.y * 0.7071) * dy;
       Line ray_camera_frame =
-          Line(worldline_.PosAfter(delta_t),
+          Line(Vec4(delta_t, kZero3),
                -(central_line + x * right + y * down).NormalizedNonzero());
-      // transform to standard frame
+      // transform to standard frame - this implements camera movement
       rays.push_back(ray_camera_frame.TransformedFromFrame(worldline_));
     }
   }
@@ -52,16 +52,18 @@ Scene &Scene::AddCamera(const Camera &camera) {
 }
 
 const Camera &Scene::GetCamera(int index) const {
-  if (index > cameras_.size() - 1) {
+  if (index + 1 > cameras_.size()) {
     throw std::invalid_argument("Camera index " + std::to_string(index) +
                                 " exceeds number of cameras in Scene.");
   }
   return cameras_.at(index);
 }
 
-Scene &Scene::SetSkylight(Spectrum skylight_spectrum, Vec3 skylight_direction) {
+Scene &Scene::SetSkylight(Spectrum skylight_spectrum, Vec3 skylight_direction,
+                          float skylight_exponent) {
   skylight_ = skylight_spectrum;
   skylight_direction_ = skylight_direction;
+  skylight_exponent_ = skylight_exponent;
   return *this;
 }
 
@@ -69,7 +71,7 @@ Scene &Scene::SetSkylight(Spectrum skylight_spectrum, Vec3 skylight_direction) {
   HITRECORD THINGS
 */
 
-inline float HitRecord::hit_time() const {
+inline float HitRecord::HitTime() const {
   return (rf.pos + obj->GetOrigin()).TransformedFromFrame(obj->GetVelocity()).t;
 }
 
@@ -91,31 +93,28 @@ OptionalHitRecord Object::intersect(const Line &ray) const {
   return HitRecord(rf_hit.value(), this);
 }
 
-std::optional<float> plane_intersection_time(Vec3 x_0, Vec3 vel,
+// Computes the intersection time of a ray (`x_o`, `vel`) with
+// the plane going through `plane_o` with normal vector `plane_normal`
+std::optional<float> plane_intersection_time(Vec3 x_0, Vec3 vel, Vec3 plane_o,
                                              Vec3 plane_normal) {
-  // assume plane goes through the origin
-  // TODO(c): build in division safety
-  // alternatively return no hit here
   float v_n = Dot3(vel, plane_normal);
   if (v_n >= 0 && v_n < kDivisionEpsilon) {
-    // v_n = kDivisionEpsilon;
     return std::nullopt;
   } else if (v_n < 0 && v_n > -kDivisionEpsilon) {
-    // v_n = -kDivisionEpsilon;
     return std::nullopt;
   }
-  float delta = -Dot3(x_0, plane_normal) / v_n;
+  float delta = -Dot3(x_0 - plane_o, plane_normal) / v_n;
   // account for fact that rays travel BACKWARD in time
   if (delta >= -kTimeEpsilon) return std::nullopt;
   return delta;
 }
 
-UVCoordinates uv_coordinates(Vec3 x, Vec3 a, Vec3 b) {
+UVCoordinates uv_coordinates(Vec3 x, Vec3 o, Vec3 a, Vec3 b) {
   float a_b = Dot3(a, b);
   float a_a = a.NormSq();
   float b_b = b.NormSq();
-  float x_a = Dot3(x, a);
-  float x_b = Dot3(x, b);
+  float x_a = Dot3(x - o, a);
+  float x_b = Dot3(x - o, b);
   float det = a_a * b_b - a_b * a_b;
   if (det < kDivisionEpsilon) {
     // a and b are collinear - throw exception
@@ -179,11 +178,11 @@ OptionalReferenceFrameHit Sphere::intersect_in_rest_frame(
 }
 
 // Finds nearest hit of the ray with an object in the scene.
-// We compute the `hit_time` as experienced in the standard
+// We compute the `HitTime` as experienced in the standard
 // inertial frame and return the hit corresponding to the
 // earliest time.
 OptionalHitRecord Scene::MostRecentHit(const Line &ray) const {
-  OptionalHitRecord most_recent_hit;
+  OptionalHitRecord most_recent_hit = std::nullopt;
   // positive `best time` is code for no hit
   // rays travel BACKWARD in time
   float best_time = 1;
@@ -191,13 +190,14 @@ OptionalHitRecord Scene::MostRecentHit(const Line &ray) const {
   // Loop over objects, find nearest (=most recent) intersection
   for (const auto &obj : objects_) {
     OptionalHitRecord obj_hit = obj->intersect(ray);
-    if (!obj_hit) continue;
-    float obj_time = obj_hit.value().hit_time();
-    if (obj_time > -kTimeEpsilon) continue;
+    if (!obj_hit.has_value()) continue;
+    // travel time should be NEGATIVE for a valid intersection
+    float travel_time = obj_hit.value().HitTime() - ray.origin.t;
+    if (travel_time > -kTimeEpsilon) continue;
 
-    if (best_time > 0 || (obj_time > best_time)) {
+    if (best_time > 0 || (travel_time > best_time)) {
       most_recent_hit = obj_hit;
-      best_time = obj_time;
+      best_time = travel_time;
     }
   }
 
@@ -205,7 +205,12 @@ OptionalHitRecord Scene::MostRecentHit(const Line &ray) const {
 }
 
 Spectrum Scene::EscapedRayColor(const Line &ray) const {
-  return ambient_background_ + skylight_ * Dot3(skylight_direction_, ray.vel);
+  float skylight_factor = Dot3(skylight_direction_, ray.vel);
+  if (skylight_factor > 0) {
+    return ambient_background_ +
+           skylight_ * powf(skylight_factor, skylight_exponent_);
+  }
+  return ambient_background_;
 }
 
 Scene &Scene::SetAmbientBackground(const Spectrum &bg_spectrum) {
@@ -215,19 +220,17 @@ Scene &Scene::SetAmbientBackground(const Spectrum &bg_spectrum) {
 
 OptionalReferenceFrameHit Shape2D::intersect_in_rest_frame(
     const Line &ray) const {
-  Vec3 x_0 = ray.origin.r;
-  Vec3 vel = ray.vel;
-
-  std::optional<float> delta_ = plane_intersection_time(x_0, vel, normal_);
+  std::optional<float> delta_ =
+      plane_intersection_time(ray.origin.r, ray.vel, o_, normal_);
   if (!delta_.has_value()) return std::nullopt;
   float delta = delta_.value();
 
   Vec4 pos = ray.PosAfter(delta);
-  UVCoordinates uv = uv_coordinates(pos.r, a_, b_);
+  UVCoordinates uv = uv_coordinates(pos.r, o_, a_, b_);
 
   if (!is_inside_shape(uv)) return std::nullopt;
 
-  return rf_hit_from(pos, vel, normal_);
+  return rf_hit_from(pos, ray.vel, normal_);
 }
 
 bool Plane::is_inside_shape(float u, float v) const { return true; }

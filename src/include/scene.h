@@ -27,23 +27,21 @@ struct HitRecord {
   HitRecord &operator=(const HitRecord &) = default;
 
   // time passed / ray length in !standard! frame
-  float hit_time() const;
+  float HitTime() const;
 };
 typedef std::optional<HitRecord> OptionalHitRecord;
 
-typedef std::shared_ptr<Material> MaterialPtr;
 class Object {
  public:
-  Object(Material mat, Line worldline)
-      : worldline_(worldline), mat_(std::make_shared<Material>(mat)) {}
-  Object(MaterialPtr mat, Line worldline) : worldline_(worldline), mat_(mat) {}
+  Object(Line worldline, Material mat = Material())
+      : worldline_(worldline), mat_(mat) {}
 
   Vec4 PosAt(float time) const;
   Vec4 PosAfter(float d_time) const;
   OptionalHitRecord intersect(const Line &) const;
 
-  MaterialPtr GetMaterial() const { return mat_; }
-  void SetMaterial(Material mat) { mat_ = std::make_shared<Material>(mat); }
+  const Material *GetMaterial() const { return &mat_; }
+  void SetMaterial(Material mat) { mat_ = mat; }
 
   Vec4 GetOrigin() const { return worldline_.origin; }
   Vec3 GetVelocity() const { return worldline_.vel; }
@@ -51,7 +49,7 @@ class Object {
 
  private:
   Line worldline_;
-  MaterialPtr mat_;
+  Material mat_;
 
   virtual OptionalReferenceFrameHit intersect_in_rest_frame(
       const Line &) const = 0;
@@ -64,16 +62,16 @@ struct UVCoordinates {
 
 // Return t such that x_0 + vel * t intersects
 // the plane through the origin with given normal
-std::optional<float> plane_intersection_time(Vec3 x_0, Vec3 vel,
+std::optional<float> plane_intersection_time(Vec3 x_0, Vec3 vel, Vec3 plane_o,
                                              Vec3 plane_normal);
 
-// Given vectors x, a, b, returns u,v such that
+// Given vectors x, o, a, b, returns u,v such that
 // x' = u * a + v * b is the closest approximation to x
-// in the plane spanned by a and b
+// in the plane going through o spanned by a and b
 // (mostly used when x is on the plane spanned by a and b)
-UVCoordinates uv_coordinates(Vec3 x, Vec3 a, Vec3 b);
+UVCoordinates uv_coordinates(Vec3 x, Vec3 o, Vec3 a, Vec3 b);
 
-// Return ReferenceFrameHit for think object, automating
+// Return ReferenceFrameHit for thin object, automating
 // INSIDE/OUTSIDE detection
 ReferenceFrameHit rf_hit_from(Vec4 pos, Vec3 ray_vel, Vec3 outside_normal);
 
@@ -84,13 +82,15 @@ typedef std::vector<ObjectPointer> ObjectList;
 
 class Sphere : public Object {
  public:
-  // Construct sphere from centre worldline and radius
-  Sphere(Material mat, Line worldline, float rad)
-      : Object(mat, worldline), rad_(rad) {}
-  // Construct sphere from centre point `O`, radius `rad`,
+  // Construct sphere from center worldline and restframe radius
+  Sphere(Line worldline, float rad, Material mat = Material())
+      : Object(worldline, mat), rad_(rad) {}
+  // Construct sphere from center point `O`, restframe radius `rad`,
   // timeslice `t`, and velocity `vel` (default: stationary)
-  Sphere(Material mat, Vec3 O, float rad, float t = 0, Vec3 vel = kZero3)
-      : Object(mat, Line(Vec4(t, O), vel)), rad_(rad) {}
+  Sphere(Vec3 O, float rad, Vec3 vel = kZero3, float t = 0,
+         Material mat = Material())
+      : Object(Line(Vec4(t, O), vel), mat), rad_(rad) {}
+  Sphere(Vec3 O, float rad, Material mat) : Sphere(O, rad, kZero3, 0, mat) {}
   float rad();
 
  private:
@@ -100,12 +100,14 @@ class Sphere : public Object {
 
 class Shape2D : public Object {
  public:
-  Shape2D(Material mat, Line worldline, Vec3 a, Vec3 b)
-      : Object(mat, worldline), a_(a), b_(b), normal_(NormalTo(a, b)) {}
+  Shape2D(Line worldline, Vec3 o, Vec3 a, Vec3 b, Material mat = Material())
+      : Object(worldline, mat), o_(o), a_(a), b_(b), normal_(NormalTo(a, b)) {}
 
  private:
-  const Vec3 a_, b_;   // two vectors spanning the shape
-  const Vec3 normal_;  // outside normal of the shape
+  // all in rest frame:
+  const Vec3 o_;       // origin of shape in rest frame
+  const Vec3 a_, b_;   // two vectors spanning the plane of the shape
+  const Vec3 normal_;  // outside normal of the shape, (a ∧ b).Normalized()
 
   OptionalReferenceFrameHit intersect_in_rest_frame(const Line &) const;
   bool is_inside_shape(UVCoordinates uv) const {
@@ -117,17 +119,19 @@ class Shape2D : public Object {
 
 class Triangle : public Shape2D {
  public:
-  // Construct triangle from `worldline` of one vertex
-  // and sides `a`, `b` in restframe of that vertex
-  Triangle(Material mat, Line worldline, Vec3 a, Vec3 b)
-      : Shape2D(mat, worldline, a, b) {}
-  // Construct triangle given the three vertices `A`, `B`, `C`,
-  // timeslice `t` and velocity `vel` (default: stationary)
-  Triangle(Material mat, Vec3 A, Vec3 B, Vec3 C, float t = 0, Vec3 vel = kZero3)
-      : Shape2D(mat, Line(Vec4(t, A), vel), B - A, C - A) {}
-  // The worldline of the shape tracks one of the vertices.
-  // a_ and b_ are the positions of the other vertices in
-  // the restframe of the triangle.
+  // Construct triangle from `worldline` of a point
+  // and the three vertices `A_rf`, `B_rf`, `C_rf` in restframe
+  Triangle(Line worldline, Vec3 A_rf, Vec3 B_rf, Vec3 C_rf,
+           Material mat = Material())
+      : Shape2D(worldline, A_rf, B_rf - A_rf, C_rf - A_rf, mat) {}
+  // Construct triangle given a point `O` on it in the standard frame,
+  // the three vertices `A_rf`, `B_rf`, `C_rf` in its restframe (relative to O),
+  // velocity `vel` of O (default: stationary)
+  // and the time `t` at which its position is given (default: 0)
+  Triangle(Vec3 O, Vec3 A_rf, Vec3 B_rf, Vec3 C_rf, Vec3 vel = kZero3,
+           float t = 0, Material mat = Material())
+      : Triangle(Line(Vec4(t, O), vel), A_rf, B_rf, C_rf, mat) {}
+
  private:
   // check if u > 0, v > 0, u+v <= 1
   bool is_inside_shape(float u, float v) const override;
@@ -135,16 +139,30 @@ class Triangle : public Shape2D {
 
 class Parallelogram : public Shape2D {
  public:
-  // Construct Parallelogram from worldline of a vertex 0
-  // and `a`, `b`, the two adjacent vertices of 0
-  // in the restframe (with 0 at the origin)
-  Parallelogram(Material mat, Line worldline, Vec3 a, Vec3 b)
-      : Shape2D(mat, worldline, a, b) {}
-  // Construct Parallelogram from three adjacent vertices 'A', 'B', 'C',
-  // timeslice `t` and velocity `vel` (default: stationary)
-  Parallelogram(Material mat, Vec3 A, Vec3 B, Vec3 C, float t = 0,
-                Vec3 vel = kZero3)
-      : Shape2D(mat, Line(Vec4(t, A), vel), B - A, C - A) {}
+  // Construct Parallelogram from the `worldline` of the coordinate origin,
+  // the position `o_rf` of a vertex in its restframe,
+  // and `a_rf`, `b_rf`, its spanning sides in the restframe
+  Parallelogram(Line worldline, Vec3 o_rf, Vec3 a_rf, Vec3 b_rf,
+                Material mat = Material())
+      : Shape2D(worldline, o_rf, a_rf, b_rf, mat) {}
+  // Construct Parallelogram from `worldline_c` of the center point,
+  // vectors `half_a`, `half_b` from center to the midpoints of
+  // the sides of the parallelogram
+  Parallelogram(Line worldline_c, Vec3 half_a, Vec3 half_b,
+                Material mat = Material())
+      : Parallelogram(worldline_c, -(half_a + half_b), 2 * half_a, 2 * half_b,
+                      mat) {}
+  // Construct Parallelogram from position `C` of the center point,
+  // vectors `half_a`, `half_b` from center to the midpoints of
+  // the sides of the parallelogram, velocity `vel` (default: stationary)
+  // and timeslice `t` (default: 0)
+  Parallelogram(Vec3 C, Vec3 half_a, Vec3 half_b, Vec3 vel = kZero3,
+                float t = 0.0f, Material mat = Material())
+      : Parallelogram(Line(Vec4(t, C), vel), -(half_a + half_b), 2 * half_a,
+                      2 * half_b, mat) {}
+  Parallelogram(Vec3 C, Vec3 half_a, Vec3 half_b, Material mat = Material())
+      : Parallelogram(Line(Vec4(0, C), kZero3), -(half_a + half_b), 2 * half_a,
+                      2 * half_b, mat) {}
 
  private:
   // check if u > 0, v > 0, u < 1, v < 1
@@ -154,62 +172,65 @@ class Parallelogram : public Shape2D {
 class Plane : public Shape2D {
  public:
   // Construct plane from worldline of a point
-  // and two vectors `a`, `b` spanning the plane
+  // and two vectors `a_rf`, `b_rf` spanning the plane
   // in the restframe of that point
-  Plane(Material mat, Line worldline, Vec3 a, Vec3 b)
-      : Shape2D(mat, worldline, a, b) {}
-  // Construct plane by giving 3 points `A`, `B`, `C` on it,
-  // a timeslice `t` and a velocity `vel`
-  // Defaults to a stationary plane if `t` and `vel` are
-  // not specified.
-  Plane(Material mat, Vec3 A, Vec3 B, Vec3 C, float t = 0, Vec3 vel = kZero3)
-      : Shape2D(mat, Line(Vec4(t, A), vel), B - A, C - A){};
+  Plane(Line worldline, Vec3 a_rf, Vec3 b_rf, Material mat = Material())
+      : Shape2D(worldline, kZero3, a_rf, b_rf, mat) {}
+  // Construct plane by giving a point `O`, on it (in the standard frame),
+  // two vectors `a_rf`, `b_rf` spanning it in its restframe,
+  // the velocity `vel` (default: stationary) and timeslice `t` (default: 0)
+  Plane(Vec3 O, Vec3 a_rf, Vec3 b_rf, Vec3 vel = kZero3, float t = 0,
+        Material mat = Material())
+      : Plane(Line(Vec4(t, O), vel), a_rf, b_rf, mat) {}
+  Plane(Vec3 O, Vec3 a_rf, Vec3 b_rf, Material mat = Material())
+      : Plane(O, a_rf, b_rf, kZero3, 0, mat) {}
 
  private:
   bool is_inside_shape(float u, float v) const override;
 };
 
-// TODO(c): implement composites
-// An object comprised of multiple sub-objects,
-// all moving uniformly - simplify intersection logic by
-// turning Lorentz transformations into simple shifts
-// class CompositeObject : public Object {
-//};
 class Box {
- private:
-  Line worldline_BUR_;
-
  public:
   // we say `up` & `down` to avoid the Bottom-Back intials clash
+  Parallelogram right;
+  Parallelogram back;
+  Parallelogram up;
+  Parallelogram left;
   Parallelogram front;
   Parallelogram down;
-  Parallelogram left;
-  Parallelogram back;
-  Parallelogram right;
-  Parallelogram up;
 
-  // Construct Box from worldline of Front Down Left corner
-  // and edge vectors front_to_back, down_to_up, left_to_right
-  Box(Material mat, Line worldline_FDL, Vec3 front_to_back, Vec3 down_to_up,
-      Vec3 left_to_right)
-      : worldline_BUR_(Vec4(worldline_FDL.origin.t,
-                            worldline_FDL.origin.r + front_to_back +
-                                down_to_up + left_to_right),
-                       worldline_FDL.vel),
-        front(mat, worldline_FDL, left_to_right, down_to_up),
-        down(mat, worldline_FDL, front_to_back, left_to_right),
-        left(mat, worldline_FDL, down_to_up, front_to_back),
-        back(mat, worldline_BUR_, -down_to_up, -left_to_right),
-        up(mat, worldline_BUR_, -left_to_right, -front_to_back),
-        right(mat, worldline_BUR_, -front_to_back, -down_to_up) {}
+  // Construct Box from `worldline_c` of center
+  // and vectors `c_to_right`, `c_to_back`, `c_to_up`
+  // from the center to the midpoints of right, back
+  // and up face, respectively.
+  Box(Line worldline_c, Vec3 c_to_right, Vec3 c_to_back, Vec3 c_to_up,
+      Material mat = Material())
+      : right(worldline_c, c_to_right + c_to_back + c_to_up, -2 * c_to_back,
+              -2 * c_to_up, mat),
+        back(worldline_c, c_to_right + c_to_back + c_to_up, -2 * c_to_up,
+             -2 * c_to_right, mat),
+        up(worldline_c, c_to_right + c_to_back + c_to_up, -2 * c_to_right,
+           -2 * c_to_back, mat),
+        left(worldline_c, -c_to_right - c_to_back - c_to_up, 2 * c_to_up,
+             2 * c_to_back, mat),
+        front(worldline_c, -c_to_right - c_to_back - c_to_up, 2 * c_to_right,
+              2 * c_to_up, mat),
+        down(worldline_c, -c_to_right - c_to_back - c_to_up, 2 * c_to_back,
+             2 * c_to_right, mat) {}
 
-  // Construct box given 4 vertices `FDL` (front, down, left),
-  // `BDL` (back, down, left), `FUL` (front, up, left),
-  // `FDR` (front, down, right) and optionally
-  // a timeslice `t` and velocity `vel`. (Default=stationary)
-  Box(Material mat, Vec3 FDL, Vec3 BDL, Vec3 FUL, Vec3 FDR, float t = 0,
-      Vec3 vel = kZero3)
-      : Box(mat, Line(Vec4(t, FDL), vel), BDL - FDL, FUL - FDL, FDR - FDL) {}
+  // Construct box by giving its center point `O`, (in the standard frame),
+  // vectors `c_to_right`, `c_to_back`, `c_to_up`
+  // from the center to the midpoints of right, back
+  // and up face, respectively.
+  // Optional:
+  // Velocity `vel` (default=stationary),
+  // and timeslice `t` (default=0).
+  Box(Vec3 O, Vec3 c_to_right, Vec3 c_to_back, Vec3 c_to_up, Vec3 vel = kZero3,
+      float t = 0.0f, Material mat = Material())
+      : Box(Line(Vec4(t, O), vel), c_to_right, c_to_back, c_to_up, mat) {}
+
+  Box(Vec3 O, Vec3 c_to_right, Vec3 c_to_back, Vec3 c_to_up, Material mat)
+      : Box(O, c_to_right, c_to_back, c_to_up, kZero3, 0, mat) {}
 };
 
 class Camera {
@@ -217,18 +238,18 @@ class Camera {
   // Constructs camera from `worldline` of camera sensor,
   // and screen data (given in the restframe of the camera
   // with the camera at the origin).
-  Camera(Line worldline, Vec3 cam_to_screen_centre, Vec3 screen_centre_to_right,
+  Camera(Line worldline, Vec3 cam_to_screen_center, Vec3 screen_center_to_right,
          int width, int height)
       : worldline_(worldline),
-        screen_centre_(cam_to_screen_centre),
-        screen_right_(screen_centre_to_right),
+        screen_center_(cam_to_screen_center),
+        screen_center_to_right_(screen_center_to_right),
         screen_width_(width),
         screen_height_(height) {}
 
-  Camera(Vec3 origin, Vec3 screen_centre, Vec3 screen_centre_to_right,
-         int width, int height, float t = 0, Vec3 vel = kZero3)
-      : Camera(Line(Vec4(t, origin), vel), screen_centre,
-               screen_centre_to_right, width, height) {}
+  Camera(Vec3 origin, Vec3 cam_to_screen_center, Vec3 screen_center_to_right,
+         int width, int height, Vec3 vel = kZero3, float t = 0)
+      : Camera(Line(Vec4(t, origin), vel), cam_to_screen_center,
+               screen_center_to_right, width, height) {}
 
   int GetScreenWidth() const { return screen_width_; }
   int GetScreenHeight() const { return screen_height_; }
@@ -242,8 +263,9 @@ class Camera {
   Line worldline_;
 
   // screen data
-  Vec3 screen_centre_;
-  Vec3 screen_right_;  // middle of right screen edge
+  Vec3 screen_center_;
+  // vector from screen center to middle of right edge
+  Vec3 screen_center_to_right_;
   // screen size in pixels
   int screen_width_;
   int screen_height_;
@@ -266,9 +288,9 @@ class Scene {
     Add(box.right);
   }
 
-  Scene& AddCamera(const Camera &);
+  Scene &AddCamera(const Camera &);
 
-  Scene& SetSkylight(const Spectrum skylight, Vec3 skylight_direction);
+  Scene &SetSkylight(const Spectrum skylight, Vec3 skylight_direction, float skylight_exponent = 1.0f);
 
   const Camera &GetCamera(int index = 0) const;
 
@@ -285,6 +307,7 @@ class Scene {
   Spectrum ambient_background_ = kBlack;
   Spectrum skylight_ = kBlack;
   Vec3 skylight_direction_ = kDefaultNormal;
+  float skylight_exponent_ = 1.0f;
 };
 
 #endif

@@ -76,7 +76,10 @@ Material &Material::SetProperty(std::string bool_property_name,
 }
 
 Spectrum Material::EmissionSpectrum(const ReferenceFrameHit &rf_hit) const {
-  // TODO(c): is it right for this to have the dot product factor??
+  float dot_factor = Dot3(rf_hit.normal, rf_hit.scattered);
+  if (dot_factor < 0) {
+    return kBlack;
+  }  // else
   return Dot3(rf_hit.normal, rf_hit.scattered) * emission_;
 }
 
@@ -111,6 +114,8 @@ ScatterData Material::SpecularInverseScatter(
 ScatterData Material::DielectricInverseScatter(
     const ReferenceFrameHit &rf_hit,
     SpectrumTransform &cumulative_transform) const {
+  cumulative_transform.ApplyFactor(albedo_);
+  cumulative_transform.ApplyAbsorption(absorption_);
   // Adapted from “Ray Tracing in One Weekend.”
   // raytracing.github.io/books/RayTracingInOneWeekend.html
   // (we need to keep track of the group velocity of the ray.)
@@ -170,3 +175,7 @@ Material Metal(float albedo, Spectrum absorption, float fuzz) {
 }
 
 Material Mirror(float fuzz) { return Metal(1.0f, kBlack, fuzz); }
+
+Material Light(Spectrum emission, Spectrum absorption) {
+  return Metal(0.0f, absorption, 0.0f).SetProperty("emission", emission);
+}

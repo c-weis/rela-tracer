@@ -73,6 +73,7 @@ class Spectrum {
   explicit Spectrum(GaussianData mode)
       : Spectrum(std::vector<GaussianData>{mode}) {}
   std::vector<GaussianData> getModes() const;
+  size_t size() const;
 
   Spectrum &operator+=(const Spectrum &other);
   Spectrum operator+(const Spectrum &other) const;
@@ -97,10 +98,10 @@ Spectrum BlackBodyRadiation(float T, float amplitude_rescale = 1.0f);
 class SpectrumTransform {
  public:
   SpectrumTransform(float brightness = 1.0f, float wavelength_rescale = 1.0f,
-                    std::vector<Spectrum> absorbtions = {})
+                    std::vector<Spectrum> absorptions = {})
       : brightness_(brightness),
         wavelength_rescale_(wavelength_rescale),
-        camera_frame_absorbtions_(absorbtions) {}
+        camera_frame_absorptions_(absorptions) {}
   SpectrumTransform(float brightness, float wavelength_rescale, Spectrum absorb)
       : SpectrumTransform(brightness, wavelength_rescale,
                           std::vector<Spectrum>{absorb}) {}
@@ -118,7 +119,7 @@ class SpectrumTransform {
 
   float wavelength_rescale_;  // rescale of wavelengths in spectrum
   std::vector<Spectrum>
-      camera_frame_absorbtions_;  // absorption spectrum to be applied
+      camera_frame_absorptions_;  // absorption spectrum to be applied
 };
 
 const Spectrum kBlack;

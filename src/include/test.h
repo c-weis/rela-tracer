@@ -10,7 +10,7 @@ class Tester {
     bool TestColors();
     bool TestLineLorentzTransforms();
     bool TestColorLorentzTransforms();
-    bool TestIntersections();
+    bool TestScenes();
     bool RunAllTests();
 };
 

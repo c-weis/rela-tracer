@@ -86,16 +86,7 @@ Material DielectricMaterial(float dielectric_n);
 Material Metal(float albedo = 1.0f, Spectrum absorption = kBlack,
                float fuzz = 0.0f);
 Material Mirror(float fuzz = 0.0f);
-
-/*
-  Specify monochromatic light source by giving brightness
-  (`brightness`) and vacuum wavelength `lambda`. The corresponding
-  angular frequency is 2 pi/lambda.
-  Unlike the wavelength, `omega` is constant across media interfaces.
-
-  We use units of nanometers for wavelengths and set c_vac=1, which forces us
-  to use units of `radians/nanosecond` for `omega`.
-*/
+Material Light(Spectrum emission = kWhite, Spectrum absorption = kWhite);
 
 const Material kWater = DielectricMaterial(1.0f);
 const Material kGlass = DielectricMaterial(1.5f);
