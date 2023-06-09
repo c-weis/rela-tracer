@@ -1,11 +1,11 @@
 // Copyright 2023 Christoph Weis
+// Basic 3- and 4-vector maths library
+// Crucially includes Lorentz transforms
 #include "include/math.h"
 
 #include <cmath>
 #include <iostream>
 #include <random>
-
-#include "math.h"
 
 /*
     3-vector lib

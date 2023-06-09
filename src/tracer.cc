@@ -190,7 +190,7 @@ bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
                   rgb_array);
     }
     OutputImage(width, height, rgb_array, rescale_factor, preview_filename);
-    std::cout << "Finished preview frame " << preview_frame + 1 << "."
+    std::cout << "Finished preview frame " << preview_frame << "."
               << std::endl;
   }
   std::cout << "---------------------------------" << std::endl;

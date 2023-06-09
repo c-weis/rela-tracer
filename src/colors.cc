@@ -5,7 +5,6 @@
 #include <cmath>
 #include <functional>
 
-#include "colors.h"
 #include "include/math.h"
 
 /*

@@ -14,12 +14,15 @@
 #include "math.h"
 #include "scene.h"
 
-enum RenderMode { kConsole, kOutputFile, kLive };
-
 /*
   TRACER CLASS
-*/
 
+  Takes in a scene of uniformly moving objects and camera data.
+  Produces a render by the usual ray-tracing procedure,
+  modified to incorporate special relativity.
+  
+  Tracer can output a single image or a series of images for a film.
+*/
 class Tracer {
  public:
   explicit Tracer(const Scene &scene) : scene_(scene) {}

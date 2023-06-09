@@ -559,7 +559,7 @@ Scene box_array(int width, int height, arglist args = {}) {
   float side = 1.0f;            // sidelength of boxes
   float spacing = 1.5f * side;  // spacing between boxes
 
-  Spectrum absorb_short(GaussianData(1.0f, 500, 25));
+  Spectrum absorb_short(GaussianData(1.0f, 400, 50));
 
   int n_args = args.size();
   if (n_args > 0) {

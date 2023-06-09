@@ -6,7 +6,6 @@
 
 #include "include/colors.h"
 #include "include/math.h"
-#include "materials.h"
 
 Vec3 LambertianInverseRay(Vec3 object_normal) {
   return -(object_normal + RandomUnitVector()).NormalizedNonzero();
