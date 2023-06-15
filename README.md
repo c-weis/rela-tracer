@@ -11,7 +11,6 @@ rela-tracer is a tool for rendering objects that move at speeds close to the spe
   - [Dielectric Delays](#dielectric-delays)
   - [Box Array](#box-array)
   - [Boxes in Mirror](#boxes-in-mirror)
-  - [Moving Box](#moving-box)
   - [Metal Balls](#metal-balls)
   - [Mirror Box](#mirror-box)
 - [Installation](#installation)
@@ -106,7 +105,6 @@ where _\<string\>_ is one of
 -   "dielectric_delays": [Dielectric Delays](#dielectric-delays)
 -   "box_array": [Box Array](#box-array)
 -   "boxes_in_mirror": [Boxes in Mirror](#boxes-in-mirror)
--   "moving_box": [Moving Box](#moving-box)
 -   "metal_balls": [Metal Balls](#metal-balls)
 -   "mirror_box": [Mirror Box](#mirror-box)
 -   "custom_scene": empty scene, to be customised in code
