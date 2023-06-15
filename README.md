@@ -40,6 +40,7 @@ Three identical spheres emitting green light are placed in front of a mirror. Th
 https://github.com/c-weis/rela-tracer/assets/34036773/f18a7491-4ff9-4a58-84e6-5842361295d2
 
 ### Headlight Absorption
+
 Three diffusely reflecting spheres are placed inside a box. The right/left panels emit red/green light, respectively. The top sphere moves towards the right, while the bottom sphere moves towards the left. This scene showcases the headlight effect for absorption: just as a fast moving light emitter emits most of its light along its direction of movement, so do fast moving objects receive most of their light along that direction.
 
 https://github.com/c-weis/rela-tracer/assets/34036773/53e3649b-7d6f-4b90-9786-c19e0d99f0f6
@@ -86,6 +87,7 @@ E.g.
     ```
 
 This should create an executable _rela-tracer_.
+Images produced will be saved to an `images` subfolder, while video frames are saved to a `vidframes` subfolder. To avoid large overhead in the code, the executable does not create these folders itself. Please create these folders by hand inside the folder you want to run _rela-tracer_.
 
 ## Usage
 
@@ -169,42 +171,30 @@ In addition, _rela-tracer_ accepts command line arguments that allow rendering s
 
 Here are some example use cases:
 
-1. Render [Headlight absorption](#headlight-absorption) with a custom output filename:
+1. Render preview frames for a film of the scene [Headlight absorption](#headlight-absorption) to `vidframes/ha_XXX.bmp` :
 
     ```bash
-    rela-tracer --scene_name my_scene --filename custom_output
+    rela-tracer --filename ha --film --start_time -1 --d_time 0.1 --end_time 1 --preview_only
     ```
 
-2. Render a preview picture of a scene named "example_scene" with a width of 800 pixels and 50 rays per pixel:
+    or, more succinctly
 
     ```bash
-    rela-tracer -sn example_scene -w 800 -rpp 50 -po
+    rela-tracer -fn ha -f -st -1 -dt 0.1 -et 1 -po
     ```
 
-3. Run tests instead of rendering a scene named "test_scene":
+2. Render a 800x600 picture of the "metal_balls" scene with 1000 rays averaged per pixel. The output `images/output.bmp` will be updated every 100 iterations.
 
     ```bash
-    rela-tracer -t --scene_name test_scene
+    rela-tracer -sn metal_balls -w 800 -h 600 -rpp 1000 -ipu 100
     ```
 
-4. Render frames of a film named "my_film" with a start time of 0.5, an end time of 5.0, and a time increment of 0.2 between frames:
+3. Start 2 parallel processes to each render 10 frames of a 20-frame film of the "dielectric_delays" scene between t=-1 and 0.9.
 
     ```bash
-    rela-tracer -f -sn my_film -st 0.5 -et 5.0 -dt 0.2
+    rela-tracer -sn dielectric_delays -fn dd --film -st -1 -dt 0.1 -et 0.9 --end_frame 10
+    rela-tracer -sn dielectric_delays -fn dd --film -st -1 -dt 0.1 -et 0.9 --start_frame 10
     ```
-
-5. Render a scene named "advanced_scene" with a custom rescale factor of 2.5:
-    ```bash
-    rela-tracer --scene_name advanced_scene --rescale_factor 2.5
-    ```
-
-These examples demonstrate the usage of different command line arguments to customize the rendering process according to specific requirements. Remember to use either the short form (single dash) or the long form (double dash) consistently for each argument.
-
-```bash
-rela-tracer --width 800 --height 600 --depth 12 --filename headlights --film
-```
-
-This command will render a film with a width of 800 pixels, a height of 600 pixels, a maximum ray depth of 12, and save the output frames with the prefix "scene_output".
 
 ## Limitations
 

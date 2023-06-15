@@ -6,3 +6,4 @@ vidframes/*
 *.ppm
 *.exe
 .fake
+rela-tracer
