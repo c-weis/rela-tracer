@@ -38,37 +38,42 @@ The following example scenes are available in this project:
 
 Three identical spheres emitting green light are placed in front of a mirror. The top sphere moves towards the camera, the bottom sphere away from it. As a result, the top sphere appears blue-shifted and the bottom sphere red-shifted. In the mirror, the effect is reversed. The mirror is tinted in order for it to be visible against the background.
 
-### Headlight Absorption
+https://github.com/c-weis/rela-tracer/assets/34036773/f18a7491-4ff9-4a58-84e6-5842361295d2
 
+### Headlight Absorption
 Three diffusely reflecting spheres are placed inside a box. The right/left panels emit red/green light, respectively. The top sphere moves towards the right, while the bottom sphere moves towards the left. This scene showcases the headlight effect for absorption: just as a fast moving light emitter emits most of its light along its direction of movement, so do fast moving objects receive most of their light along that direction.
+
+https://github.com/c-weis/rela-tracer/assets/34036773/53e3649b-7d6f-4b90-9786-c19e0d99f0f6
 
 ### Dielectric Delays
 
 Two light-emitting balls travel downwards. The view towards the left ball is obstructed by two boxes made from dielectric materials: the top one is made from glass, while the bottom one is made from diamond. Light travels slower in dielectric media, and this scene showcases the resulting delay. Further, the Doppler effect is visible again both across the range of movement of the balls and in the internal reflections of the balls in sides of the boxes.
 
+https://github.com/c-weis/rela-tracer/assets/34036773/eb9e22d8-e2ad-4d22-98da-7ff661f560e9
+
 ### Box Array
 
 A vertical array of boxes is moving horizontally at varying speeds. They are illuminated by ambient white light. Their material is set to absorb short wavelengths, making the resting box appear yellow. The scene showcases the Doppler effect on absorption properties.
+
+https://github.com/c-weis/rela-tracer/assets/34036773/5427b28f-e16b-4393-98c6-1949f2c66eec
 
 ### Boxes in Mirror
 
 A row of boxes move vertically at varying speeds above of a mirror. The fast-moving boxes appear distorted, and the mirror reflects their images with an apparent time delay due to longer light travel time.
 
-### Moving Box
-
-A square box moves horizontally above a reflective plane. This sparse scene showcases basic distortion and time-delay effects.
+https://github.com/c-weis/rela-tracer/assets/34036773/b5e5f4b1-1ec2-4f07-9f9f-8b0e4d012dd5
 
 ### Metal Balls
 
-![Metal Balls Scene](images/metal_balls.bmp)
-
 A static scene featuring three reflective balls, two of which are tinted. The balls are placed in an environment with a ground plane and a skylight. The image demonstrates reflections and the interaction of the two different absorption spectra.
+
+![metal_balls](https://github.com/c-weis/rela-tracer/assets/34036773/f6b5b263-caed-430d-adab-6c005c9feb81)
 
 ### Mirror Box
 
-![Mirror Box Scene](images/mirror_box.bmp)
-
 A metallic sphere and a small spherical light source are placed inside a box with reflective sides. The right panel of the box is tinted red, while the top emits light.
+
+![mirror_box](https://github.com/c-weis/rela-tracer/assets/34036773/e6277ada-2921-458c-b656-9885ce864319)
 
 ## Installation
 
