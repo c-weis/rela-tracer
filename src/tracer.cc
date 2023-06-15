@@ -13,7 +13,6 @@
 #include "include/materials.h"
 #include "include/math.h"
 #include "include/scene.h"
-#include "tracer.h"
 
 const int kRescaleFactorRays = 1000;
 
@@ -22,14 +21,14 @@ const int kRescaleFactorRays = 1000;
 // Note that iteration=0 automatically overwrites the rgb_array, which allows
 // easy reuse of the same array for independent frames in a film.
 void Tracer::UpdateFrame(const LineList &image_rays, int depth, Vec3 cam_vel,
-                         int iteration, std::vector<rgbData> &rgb_array) const {
+                         int iteration, std::vector<rgbData> *rgb_array) const {
   for (int pixel = 0; pixel < image_rays.size(); pixel++) {
     Line ray = image_rays[pixel];
 
     rgbData pixel_rgb = TraceRay(ray, depth, cam_vel);
 
-    rgb_array[pixel] = (rgb_array[pixel] * iteration + pixel_rgb) /
-                       (static_cast<float>(iteration) + 1.0f);
+    rgb_array->at(pixel) = (rgb_array->at(pixel) * iteration + pixel_rgb) /
+                           (static_cast<float>(iteration) + 1.0f);
   }
 }
 
@@ -98,7 +97,7 @@ bool Tracer::RenderImage(int rays_per_pixel, int depth, int camera_index,
     // refresh image rays
     image_rays = camera.ImageRays(camera_time);
 
-    UpdateFrame(image_rays, depth, camera.GetVelocity(), iteration, rgb_array);
+    UpdateFrame(image_rays, depth, camera.GetVelocity(), iteration, &rgb_array);
 
     if ((iteration + 1) % iterations_per_update == 0) {
       OutputImage(width, height, rgb_array, rescale_factor, live_filename);
@@ -187,11 +186,10 @@ bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
     for (int iteration = 0; iteration < preview_rays_per_pixel; iteration++) {
       LineList image_rays = camera.ImageRays(preview_time);
       UpdateFrame(image_rays, preview_depth, camera.GetVelocity(), iteration,
-                  rgb_array);
+                  &rgb_array);
     }
     OutputImage(width, height, rgb_array, rescale_factor, preview_filename);
-    std::cout << "Finished preview frame " << preview_frame << "."
-              << std::endl;
+    std::cout << "Finished preview frame " << preview_frame << "." << std::endl;
   }
   std::cout << "---------------------------------" << std::endl;
 
@@ -226,7 +224,7 @@ bool Tracer::RenderFilm(int rays_per_pixel, int depth, int camera_index,
       LineList image_rays = camera.ImageRays(camera_time);
 
       UpdateFrame(image_rays, depth, camera.GetVelocity(), iteration,
-                  rgb_array);
+                  &rgb_array);
 
       if ((iteration + 1) % iterations_per_update == 0 ||
           iteration + 1 == rays_per_pixel) {
@@ -324,9 +322,8 @@ rgbData Tracer::TraceRay(const Line &ray_0, int depth, Vec3 camera_vel) const {
     cumulative_transform.ApplyAbsorption(mat->AbsorptionCurve(hit.rf));
 
     // de-scatter
-    ScatterData scatter_data =
-        mat->InverseScatter(hit.rf, cumulative_transform);
-    Vec3 ray_vel = scatter_data.vel_.VelTransformedFromFrame(object_velocity);
+    Vec3 scatter_vel = mat->InverseScatter(hit.rf, &cumulative_transform);
+    Vec3 ray_vel = scatter_vel.VelTransformedFromFrame(object_velocity);
     ray = Line(ray_origin, ray_vel);
     cumulative_transform.ApplyTransformationToFrame(ray_vel, object_velocity);
   }

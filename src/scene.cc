@@ -8,15 +8,11 @@
 
 #include "include/colors.h"
 #include "include/materials.h"
-#include "scene.h"
 
 // Constant allowing for rounding errors in
 // computing intersections of scattered rays
 const float kTimeEpsilon = 5e-6f;
 
-/*
-  CAMERA DATA
-*/
 // Computes the list of image rays for the image received at
 // the camera after delta_t has elapsed
 // (counted in camera ref frame, from camera origin time)
@@ -46,11 +42,6 @@ LineList Camera::ImageRays(float delta_t) const {
   return rays;
 }
 
-Scene &Scene::AddCamera(const Camera &camera) {
-  cameras_.push_back(camera);
-  return *this;
-}
-
 const Camera &Scene::GetCamera(int index) const {
   if (index + 1 > cameras_.size()) {
     throw std::invalid_argument("Camera index " + std::to_string(index) +
@@ -67,23 +58,14 @@ Scene &Scene::SetSkylight(Spectrum skylight_spectrum, Vec3 skylight_direction,
   return *this;
 }
 
-/*
-  HITRECORD THINGS
-*/
-
 inline float HitRecord::HitTime() const {
   return (rf.pos + obj->GetOrigin()).TransformedFromFrame(obj->GetVelocity()).t;
 }
 
-/*
-  ABSTRACT OBJECT MOVEMENT AND INTERSECTION
-*/
-Vec4 Object::PosAt(float time) const { return worldline_.PosAt(time); }
-
-Vec4 Object::PosAfter(float d_time) const {
-  return worldline_.PosAfter(d_time);
-}
-
+// Intersection method common to all objects. Takes a ray and returns a record
+// of the closest intersection with this object (if there is one). Calls the
+// virtual function `intersect_in_rest_frame`, which is adapted polymorphically
+// to object type.
 OptionalHitRecord Object::intersect(const Line &ray) const {
   OptionalReferenceFrameHit rf_hit =
       intersect_in_rest_frame(ray.TransformedToFrame(worldline_));
@@ -95,8 +77,9 @@ OptionalHitRecord Object::intersect(const Line &ray) const {
 
 // Computes the intersection time of a ray (`x_o`, `vel`) with
 // the plane going through `plane_o` with normal vector `plane_normal`
-std::optional<float> plane_intersection_time(Vec3 x_0, Vec3 vel, Vec3 plane_o,
-                                             Vec3 plane_normal) {
+std::optional<float> Shape2D::IntersectionTime(Vec3 x_0, Vec3 vel,
+                                                      Vec3 plane_o,
+                                                      Vec3 plane_normal) {
   float v_n = Dot3(vel, plane_normal);
   if (v_n >= 0 && v_n < kDivisionEpsilon) {
     return std::nullopt;
@@ -109,7 +92,7 @@ std::optional<float> plane_intersection_time(Vec3 x_0, Vec3 vel, Vec3 plane_o,
   return delta;
 }
 
-UVCoordinates uv_coordinates(Vec3 x, Vec3 o, Vec3 a, Vec3 b) {
+UVCoordinates Shape2D::UVCoords(Vec3 x, Vec3 o, Vec3 a, Vec3 b) {
   float a_b = Dot3(a, b);
   float a_a = a.NormSq();
   float b_b = b.NormSq();
@@ -127,7 +110,8 @@ UVCoordinates uv_coordinates(Vec3 x, Vec3 o, Vec3 a, Vec3 b) {
                        .v = (-a_b * x_a + a_a * x_b) / det};
 }
 
-ReferenceFrameHit rf_hit_from(Vec4 pos, Vec3 ray_vel, Vec3 outside_normal) {
+ReferenceFrameHit Shape2D::MakeRfHit(Vec4 pos, Vec3 ray_vel,
+                                       Vec3 outside_normal) {
   // Checks if ray_vel is aligned or anti-aligned with outside_normal,
   // deduces whether we hit in- or outside
   if (Dot3(ray_vel, outside_normal) < 0) {
@@ -137,9 +121,9 @@ ReferenceFrameHit rf_hit_from(Vec4 pos, Vec3 ray_vel, Vec3 outside_normal) {
   return ReferenceFrameHit(pos, outside_normal, ray_vel);
 }
 
-/*
-  SPECIFIC OBJECTS
-*/
+// ------------------
+//  SPECIFIC OBJECTS
+// ------------------
 
 float Sphere::rad() { return rad_; }
 
@@ -221,16 +205,16 @@ Scene &Scene::SetAmbientBackground(const Spectrum &bg_spectrum) {
 OptionalReferenceFrameHit Shape2D::intersect_in_rest_frame(
     const Line &ray) const {
   std::optional<float> delta_ =
-      plane_intersection_time(ray.origin.r, ray.vel, o_, normal_);
+      IntersectionTime(ray.origin.r, ray.vel, o_, normal_);
   if (!delta_.has_value()) return std::nullopt;
   float delta = delta_.value();
 
   Vec4 pos = ray.PosAfter(delta);
-  UVCoordinates uv = uv_coordinates(pos.r, o_, a_, b_);
+  UVCoordinates uv = UVCoords(pos.r, o_, a_, b_);
 
   if (!is_inside_shape(uv)) return std::nullopt;
 
-  return rf_hit_from(pos, ray.vel, normal_);
+  return MakeRfHit(pos, ray.vel, normal_);
 }
 
 bool Plane::is_inside_shape(float u, float v) const { return true; }

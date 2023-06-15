@@ -12,29 +12,6 @@
 // TODO(c): figure out how to clean this up:
 // include these in the lib code somehow
 
-// Color constants
-const Spectrum kBrightRed = BrightNarrowBand(680);
-const Spectrum kBrightOrange = BrightNarrowBand(605);
-const Spectrum kBrightYellow = BrightNarrowBand(570);
-const Spectrum kBrightGreen = BrightNarrowBand(530);
-const Spectrum kBrightCyan = BrightNarrowBand(490);
-const Spectrum kBrightBlue = BrightNarrowBand(460);
-const Spectrum kBrightPurple = BrightNarrowBand(410);
-const Spectrum kLightRed = LightNarrowBand(680);
-const Spectrum kLightOrange = LightNarrowBand(605);
-const Spectrum kLightYellow = LightNarrowBand(580);
-const Spectrum kLightGreen = LightNarrowBand(530);
-const Spectrum kLightCyan = LightNarrowBand(490);
-const Spectrum kLightBlue = LightNarrowBand(460);
-const Spectrum kLightPurple = LightNarrowBand(410);
-const Spectrum kDimRed = DimNarrowBand(680);
-const Spectrum kDimOrange = DimNarrowBand(605);
-const Spectrum kDimYellow = DimNarrowBand(580);
-const Spectrum kDimGreen = DimNarrowBand(530);
-const Spectrum kDimCyan = DimNarrowBand(490);
-const Spectrum kDimBlue = DimNarrowBand(460);
-const Spectrum kDimPurple = DimNarrowBand(410);
-
 bool Tester::TestRandomness() {
   const int kSampleSize = 10000;
 
@@ -146,28 +123,6 @@ bool Tester::TestRandomness() {
   std::cout << "---" << std::endl;
   std::cout << "Tests completed successfully." << std::endl;
 
-  /* PASSED: Test Lambertian scattering
-  // (avg should give -2/3 along chosen norm, avg_normsq should be 1)
-  std::vector<Vec3> l_scatters;
-  const int nr_scatters = 10000;
-  l_scatters.reserve(nr_scatters);
-  std::mt19937 r_gen(42);
-  for (int i = 0; i < nr_scatters; i++) {
-    l_scatters.push_back(
-        LambertianScatter::LambertianInverseRay(Vec3(1, 0, 0), &r_gen));
-  }
-  Vec3 avg = std::reduce(l_scatters.cbegin(), l_scatters.cend(), kZero3) /
-             static_cast<float>(nr_scatters);
-  float avg_normsq = 0;
-  std::for_each(l_scatters.cbegin(), l_scatters.cend(),
-                [&avg_normsq](Vec3 vec) { avg_normsq += vec.NormSq(); });
-  avg_normsq /= nr_scatters;
-  std::cout << "Lambert scatter: "
-            << "avg: " << avg << " "
-            << "normsq: " << avg_normsq << " "
-            << std::endl;
-  */
-
   return true;
 }
 
@@ -194,7 +149,7 @@ bool Tester::TestColors() {
   const unsigned int bandwidth_side =
       (max_bandwidth - min_bandwidth) / d_bandwidth;
 
-  Spectrum super_dim_white_emission(kWhite * 0.01);
+  Spectrum super_dim_white_emission(Spectrum::White * 0.01);
 
   std::string folder = "images/test/";
 
@@ -223,7 +178,7 @@ bool Tester::TestColors() {
         } else {
           // place actual color
           Spectrum emission(
-              GaussianData(narrowband_amplitude, emit_lambda, narrowband_sig) *
+              Gaussian(narrowband_amplitude, emit_lambda, narrowband_sig) *
               brightness);
           RGBData pixel_RGB =
               no_transform.ColorFrom(emission).ToRGB(rescale_factor);
@@ -260,7 +215,7 @@ bool Tester::TestColors() {
           test_image.set_pixel(x, y, 100, 100, 100);
         } else {
           // place actual color
-          Spectrum emission(GaussianData(1.0f / bandwidth, lambda, bandwidth));
+          Spectrum emission(Gaussian(1.0f / bandwidth, lambda, bandwidth));
           RGBData pixel_RGB =
               no_transform.ColorFrom(emission).ToRGB(rescale_factor);
           test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
@@ -296,9 +251,8 @@ bool Tester::TestColors() {
         } else {
           // place actual color: a mix of lambda_x and lambda_y narrowbands
           Spectrum emission(
-              {GaussianData(narrowband_amplitude / 2, lambda_x, narrowband_sig),
-               GaussianData(narrowband_amplitude / 2, lambda_y,
-                            narrowband_sig)});
+              {Gaussian(narrowband_amplitude / 2, lambda_x, narrowband_sig),
+               Gaussian(narrowband_amplitude / 2, lambda_y, narrowband_sig)});
           RGBData pixel_RGB =
               no_transform.ColorFrom(emission).ToRGB(rescale_factor);
           test_image.set_pixel(x, y, pixel_RGB.R, pixel_RGB.G, pixel_RGB.B);
@@ -335,9 +289,9 @@ bool Tester::TestColors() {
           // place actual color: emission at lambda_emit, absorption at
           // lambda_absorb
           Spectrum emission(
-              GaussianData(narrowband_amplitude, lambda_emit, narrowband_sig));
-          Spectrum absorption(GaussianData(narrowband_amplitude, lambda_absorb,
-                                           absorptionband_sig));
+              Gaussian(narrowband_amplitude, lambda_emit, narrowband_sig));
+          Spectrum absorption(Gaussian(narrowband_amplitude, lambda_absorb,
+                                       absorptionband_sig));
           SpectrumTransform new_transform(no_transform);
           new_transform.ApplyAbsorption(absorption);
           RGBData pixel_RGB =
@@ -375,11 +329,10 @@ bool Tester::TestColors() {
         } else {
           // place actual color: dim white with absorption at
           // lambda_x and lambda_y in parallel
-          Spectrum absorption(
-              {GaussianData(narrowband_amplitude, lambda_absorb_x,
-                            absorptionband_sig),
-               GaussianData(narrowband_amplitude, lambda_absorb_y,
-                            absorptionband_sig)});
+          Spectrum absorption({Gaussian(narrowband_amplitude, lambda_absorb_x,
+                                        absorptionband_sig),
+                               Gaussian(narrowband_amplitude, lambda_absorb_y,
+                                        absorptionband_sig)});
           SpectrumTransform new_transform(no_transform);
           new_transform.ApplyAbsorption(absorption);
           RGBData pixel_RGB = new_transform.ColorFrom(super_dim_white_emission)
@@ -417,10 +370,10 @@ bool Tester::TestColors() {
         } else {
           // place actual color: dim white with absorption at
           // lambda_x and lambda_y in series
-          Spectrum absorption1(GaussianData(
-              narrowband_amplitude, lambda_absorb_x, absorptionband_sig));
-          Spectrum absorption2(GaussianData(
-              narrowband_amplitude, lambda_absorb_y, absorptionband_sig));
+          Spectrum absorption1(Gaussian(narrowband_amplitude, lambda_absorb_x,
+                                        absorptionband_sig));
+          Spectrum absorption2(Gaussian(narrowband_amplitude, lambda_absorb_y,
+                                        absorptionband_sig));
           SpectrumTransform new_transform(no_transform);
           new_transform.ApplyAbsorption(absorption1);
           new_transform.ApplyAbsorption(absorption2);
@@ -605,7 +558,7 @@ bool Tester::TestColorLorentzTransforms() {
   const float d_angle = kPi / 800.0f;
   const unsigned int angle_side = (max_angle - min_angle) / d_angle;
 
-  Spectrum super_dim_white_emission(kWhite * 0.01);
+  Spectrum super_dim_white_emission(Spectrum::White * 0.01);
   Vec3 ray_vel(-1, 0, 0);
   SpectrumTransform no_transform;
 
@@ -637,7 +590,7 @@ bool Tester::TestColorLorentzTransforms() {
           // place actual color:
           // lambda, sent from source with relative speed
           Spectrum emission(
-              GaussianData(narrowband_amplitude, lambda, narrowband_sig));
+              Gaussian(narrowband_amplitude, lambda, narrowband_sig));
           SpectrumTransform new_transform(no_transform);
           new_transform.ApplyTransformationFromFrame(ray_vel, frame_vel);
           RGBData pixel_RGB =
@@ -672,8 +625,8 @@ bool Tester::TestColorLorentzTransforms() {
         // place actual color:
         // standard_lambda, sent from source with specified relative speed and
         // angle
-        Spectrum emission(GaussianData(narrowband_amplitude, standard_lambda,
-                                       narrowband_sig));
+        Spectrum emission(
+            Gaussian(narrowband_amplitude, standard_lambda, narrowband_sig));
         SpectrumTransform new_transform(no_transform);
         new_transform.ApplyTransformationFromFrame(ray_vel, frame_vel);
         RGBData pixel_RGB =
@@ -712,7 +665,7 @@ bool Tester::TestColorLorentzTransforms() {
           // place actual color:
           // super dim white experiencing absorption at specified relative speed
           Spectrum absorption(
-              GaussianData(narrowband_amplitude, lambda, absorptionband_sig));
+              Gaussian(narrowband_amplitude, lambda, absorptionband_sig));
           SpectrumTransform new_transform(no_transform);
           new_transform.ApplyTransformationFromFrame(ray_vel, frame_vel);
           new_transform.ApplyAbsorption(absorption);
@@ -753,7 +706,7 @@ bool Tester::TestColorLorentzTransforms() {
           // place actual color:
           // super dim white experiencing absorption at specified relative speed
           Spectrum absorption(
-              GaussianData(narrowband_amplitude, lambda, absorptionband_sig));
+              Gaussian(narrowband_amplitude, lambda, absorptionband_sig));
           SpectrumTransform new_transform(no_transform);
           new_transform.ApplyTransformationFromFrame(ray_vel, frame_vel);
           new_transform.ApplyAbsorption(absorption);
@@ -787,9 +740,10 @@ bool Tester::TestScenes() {
   int depth = 3;
 
   Scene scene;
-  scene.SetAmbientBackground(kDimCyan);
+  scene.SetAmbientBackground(Spectrum::Cyan * 0.1f);
 
-  Material green_glowing_bbody(0.0f, 0.0f, 0.0f, 0.0f, kBlack, kBrightGreen);
+  Material green_glowing_bbody(0.0f, 0.0f, 0.0f, 0.0f, Spectrum::Black,
+                               Spectrum::Green);
   Material lambertian(0.8f);
 
   Vec3 ocam = kZero3;
@@ -800,7 +754,7 @@ bool Tester::TestScenes() {
 
   Camera cam(ocam, back / 2.0f, right, width, height);
 
-  scene.AddCamera(cam);
+  scene.Add(cam);
 
   float min_speed = -0.4f;
   float d_speed = 0.4f;
@@ -816,22 +770,22 @@ bool Tester::TestScenes() {
                 << ". " << std::endl;
       Scene new_scene1(scene);
       Scene new_scene2(scene);
-      Box box1(omid, side/2 * right, side/2 * back, side/2 * up,
-              speed_right * right + speed_up * up, 0, green_glowing_bbody);
-      Box box2(omid, side/2 * right, side/2 * back, side/2 * up,
-              speed_right * right + speed_up * up, 0, lambertian);
+      Box box1(omid, side / 2 * right, side / 2 * back, side / 2 * up,
+               speed_right * right + speed_up * up, 0, green_glowing_bbody);
+      Box box2(omid, side / 2 * right, side / 2 * back, side / 2 * up,
+               speed_right * right + speed_up * up, 0, lambertian);
       new_scene1.Add(box1);
       new_scene2.Add(box2);
       Tracer testtrace1(new_scene1);
       Tracer testtrace2(new_scene2);
-      testtrace1.RenderImage(rays_per_pixel, depth, 0, 10,
-                            "test/green_bbody_box_" + std::to_string(x) + "_" +
-                                std::to_string(y),
-                            0, 255, false);
-      testtrace2.RenderImage(rays_per_pixel, depth, 0, 10,
-                            "test/lambertian_box_" + std::to_string(x) + "_" +
-                                std::to_string(y),
-                            0, 255, false);
+      testtrace1.RenderImage(
+          rays_per_pixel, depth, 0, 10,
+          "test/green_bbody_box_" + std::to_string(x) + "_" + std::to_string(y),
+          0, 255, false);
+      testtrace2.RenderImage(
+          rays_per_pixel, depth, 0, 10,
+          "test/lambertian_box_" + std::to_string(x) + "_" + std::to_string(y),
+          0, 255, false);
     }
   }
 
@@ -839,6 +793,8 @@ bool Tester::TestScenes() {
 }
 
 bool Tester::RunAllTests() {
-  return TestRandomness() && TestColors() && TestLineLorentzTransforms() &&
-         TestColorLorentzTransforms() && TestScenes();
+  bool did_all_tests_work = TestRandomness() && TestColors() &&
+                            TestLineLorentzTransforms() &&
+                            TestColorLorentzTransforms() && TestScenes();
+  return did_all_tests_work;
 }

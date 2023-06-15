@@ -1,5 +1,6 @@
 // Copyright 2023 Christoph Weis
-#include <cstdio>
+#include "include/main.h"
+
 #include <iostream>
 #include <map>
 #include <vector>
@@ -7,253 +8,124 @@
 #include "include/test.h"
 #include "include/tracer.h"
 
-typedef std::vector<std::string> arglist;
+// A helpful set of directions
+const Vec3 up(0, 1, 0);
+const Vec3 right(1, 0, 0);
+const Vec3 forward = Cross(up, right);
+const Vec3 down = -up;
+const Vec3 left = -right;
+const Vec3 backward = -forward;
 
-struct cmd_line_args {
-  // Scene and output args
-  std::string scene_name = "box_array";
-  std::string filename = "output";
-  bool film = false;
-  bool preview_only = false;
-  bool test = false;  // run tests instead of render
-
-  // Standard rendering arguments
-  int width = 500;
-  int height = 500;
-  int rays_per_pixel = 100;
-  int depth = 8;
-  int iterations_per_update = 1;
-  int camera_index = 0;
-
-  // Time arguments
-  float time = -1.0f;     // = start_time for film
-  float end_time = 3.0f;  // ignored for image
-  float d_time = 0.1f;    // ignored for image
-
-  // Parallel processing helps
-  int start_frame = 0;        // first frame to render
-  int end_frame = -1;         // code for: do all frames
-  float rescale_factor = -1;  // code for: estimate rescale factor
-
-  // Scene arguments
-  arglist scene_args = {};
-
-  // Now split up arguments by type and give names and aliases.
-  std::map<std::string, int &> int_args = {
-      {"--width", width},
-      {"-w", width},
-      {"--height", height},
-      {"-h", height},
-      {"--rays_per_pixel", rays_per_pixel},
-      {"-rpp", rays_per_pixel},
-      {"--depth", depth},
-      {"-d", depth},
-      {"--camera_index", camera_index},
-      {"-ci", camera_index},
-      {"--iterations_per_update", iterations_per_update},
-      {"-ipu", iterations_per_update},
-      {"--start_frame", start_frame},
-      {"-sf", start_frame},
-      {"--end_frame", end_frame},
-      {"-ef", end_frame}};
-
-  std::map<std::string, float &> float_args = {
-      {"--start_time", time},
-      {"-st", time},
-      {"--time", time},
-      {"-t", time},
-      {"--end_time", end_time},
-      {"-et", end_time},
-      {"--d_time", d_time},
-      {"-dt", d_time},
-      {"--rescale_factor", rescale_factor},
-      {"-rf", rescale_factor}};
-
-  std::map<std::string, std::string &> string_args = {
-      {"--scene_name", scene_name},
-      {"-sn", scene_name},
-      {"--filename", filename},
-      {"-fn", filename}};
-
-  std::map<std::string, bool &> bool_args = {{"--test", test},
-                                             {"-t", test},
-                                             {"--film", film},
-                                             {"-f", film},
-                                             {"--preview_only", preview_only},
-                                             {"-po", preview_only}};
-
-  std::vector<std::string> scene_args_triggers = {"--scene_args", "--args",
-                                                  "-sa"};
-};
-
-// Parses command line arguments
-bool parse_arguments(int argc, char *argv[], cmd_line_args &args) {
-  // skip first argument: it's the filename
-  for (int i = 1; i < argc; i++) {
-    // check if it's an integer argument
-    {
-      auto int_iter = args.int_args.find(argv[i]);
-      if (int_iter != args.int_args.end()) {
-        if (i + 1 >= argc) {
-          std::cout << "Parameter keyword '" << argv[i]
-                    << "' specified without value." << std::endl;
-          return false;
-        }
-        int_iter->second = std::stoi(argv[i + 1]);
-        i++;
-        continue;
-      }
-    }
-
-    // check if it's a float argument
-    {
-      auto float_iter = args.float_args.find(argv[i]);
-      if (float_iter != args.float_args.end()) {
-        if (i + 1 >= argc) {
-          std::cout << "Parameter keyword '" << argv[i]
-                    << "' specified without value." << std::endl;
-          return false;
-        }
-        float_iter->second = std::stof(argv[i + 1]);
-        i++;
-        continue;
-      }
-    }
-
-    // check if it's a string argument
-    {
-      auto string_iter = args.string_args.find(argv[i]);
-      if (string_iter != args.string_args.end()) {
-        if (i + 1 >= argc) {
-          std::cout << "Parameter keyword '" << argv[i]
-                    << "' specified without value." << std::endl;
-          return false;
-        }
-        string_iter->second = argv[i + 1];
-        i++;
-        continue;
-      }
-    }
-
-    // check if it's a bool argument
-    {
-      auto bool_iter = args.bool_args.find(argv[i]);
-      if (bool_iter != args.bool_args.end()) {
-        bool_iter->second = true;
-        continue;
-      }
-    }
-
-    // check if it's the start of the scene arguments
-    {
-      auto sa_trigger_iter =
-          std::find(args.scene_args_triggers.cbegin(),
-                    args.scene_args_triggers.cend(), argv[i]);
-      if (sa_trigger_iter < args.scene_args_triggers.cend()) {
-        // add all following arguments into the scene_args vector
-        for (i = i + 1; i < argc; i++) {
-          args.scene_args.push_back(argv[i]);
-        }
-        break;
-      }
-    }
-
-    // it didn't match any of the above
-    std::cout << "Ignoring argument '" << argv[i]
-              << "', as it doesn't match any parameters." << std::endl;
-  }
-
-  return true;
-}
-
-// TODO(c): figure out how to clean this up:
-// include these in the lib code somehow
-
-// Color constants
-const Spectrum kBrightRed = BrightNarrowBand(680);
-const Spectrum kBrightOrange = BrightNarrowBand(605);
-const Spectrum kBrightYellow = BrightNarrowBand(570);
-const Spectrum kBrightGreen = BrightNarrowBand(530);
-const Spectrum kBrightCyan = BrightNarrowBand(490);
-const Spectrum kBrightBlue = BrightNarrowBand(460);
-const Spectrum kBrightPurple = BrightNarrowBand(410);
-const Spectrum kLightRed = LightNarrowBand(680);
-const Spectrum kLightOrange = LightNarrowBand(605);
-const Spectrum kLightYellow = LightNarrowBand(580);
-const Spectrum kLightGreen = LightNarrowBand(530);
-const Spectrum kLightCyan = LightNarrowBand(490);
-const Spectrum kLightBlue = LightNarrowBand(460);
-const Spectrum kLightPurple = LightNarrowBand(410);
-const Spectrum kDimRed = DimNarrowBand(680);
-const Spectrum kDimOrange = DimNarrowBand(605);
-const Spectrum kDimYellow = DimNarrowBand(580);
-const Spectrum kDimGreen = DimNarrowBand(530);
-const Spectrum kDimCyan = DimNarrowBand(490);
-const Spectrum kDimBlue = DimNarrowBand(460);
-const Spectrum kDimPurple = DimNarrowBand(410);
-
-// Helpful test vars
-Vec3 x(1, 0, 0);
-Vec3 y(0, 1, 0);
-Vec3 z(0, 0, 1);
-
+// A static scene involving three reflective balls of differing colours.
+// Scene arguments: none
 Scene metal_balls(int width, int height, arglist args = {}) {
   Scene scene;
 
-  Vec3 forward = y;
-  Vec3 right = x;
-  Vec3 up = right ^ forward;
-
+  // Materials
   Material lambertian = Material(0.9f, 0.7f);
-  Spectrum absorb_red_green(
-      {GaussianData(0.5f, 550, 50), GaussianData(0.5f, 600, 50)});
-  Spectrum absorb_red_blue(
-      {GaussianData(0.5f, 450, 50), GaussianData(0.5f, 600, 25)});
-  Material clean_blue_metal = Metal(0.7f, absorb_red_green);
-  Material clean_green_metal = Metal(0.7f, absorb_red_blue);
-  Material fuzzy_mirror = Mirror(0.2);
+  Spectrum absorb_red_green({Gaussian(0.5f, 550, 50), Gaussian(0.5f, 600, 50)});
+  Spectrum absorb_red_blue({Gaussian(0.5f, 450, 50), Gaussian(0.5f, 600, 25)});
+  Material clean_blue_metal = Material::Metal(0.7f, absorb_red_green);
+  Material clean_green_metal = Material::Metal(0.7f, absorb_red_blue);
+  Material fuzzy_mirror = Material::Mirror(0.2);
 
-  scene.SetAmbientBackground(kWhite * 0.01);
-  scene.SetSkylight(kDimCyan * 0.1, -up);
+  // Background lighting
+  scene.SetAmbientBackground(Spectrum::White * 0.01);
+  scene.SetSkylight(Spectrum::Cyan * 0.01, -up);
 
+  // Ground plane
   Vec3 O1 = kZero3;
   scene.Add(Plane(O1, O1 + right, O1 + forward, lambertian));
 
+  // Big sphere
   float r2 = 0.9f;
   Vec3 O2 = O1 + 2.5 * forward + r2 * up;
   scene.Add(Sphere(O2, r2, fuzzy_mirror));
 
+  // Small green sphere on right
   float r3 = 0.4f;
   Vec3 O3 = O2 - 1.5 * forward + 0.5 * right - r2 * up + r3 * up;
   scene.Add(Sphere(O3, r3, clean_green_metal));
 
+  // Medium blue sphere on left
   float r4 = 0.5f;
   Vec3 O4 = O2 - 1.3 * forward - 0.5 * right - r2 * up + r4 * up;
   scene.Add(Sphere(O4, r4, clean_blue_metal));
 
+  // Camera
   Vec3 Ocam = O1 + 0.6 * up;
   Camera cam(Ocam, (O2 - r2 * up - Ocam).NormalizedNonzero(), right, width,
              height);
-  scene.AddCamera(cam);
+  scene.Add(cam);
 
   return scene;
 }
 
-Scene moving_box(int width, int height, arglist args = {}) {
-  /*
-    MOVING BOX
-  */
+// A static scene inside a box with reflective sides, some of which are tinted.
+// The box contains a metallic sphere and a small spherical light source.
+// Scene arguments: none
+Scene mirror_box(int width, int height, arglist args = {}) {
+  Scene scene;
 
-  // Scene args - standard values
-  //  speed & material properties
-  //  of box
+  // Camera
+  Vec3 cam_pos = kZero3;
+  Camera cam(cam_pos, forward, right, width, height);
+  scene.Add(cam);
+
+  // Materials
+  Material white_light = Material::Light();
+  Material dim_white_light = Material::Light(Spectrum::White * 0.05);
+  Material metal = Material::Metal(0.8f);
+  Material red_metal = Material::Metal(0.8f, Spectrum(Gaussian(1.0f, 500, 80)));
+
+  // Auxiliary screen & direction variables
+  float aspect = static_cast<float>(width) / height;
+  Vec3 screen_top = (right ^ forward) / aspect;
+
+  // Big metal sphere
+  Vec3 sphere_vel(0, 0, 0);
+  Vec3 sphere_O = 2 * forward;
+  float sphere_rad = 1.0f;
+  Sphere sphere(sphere_O, sphere_rad, sphere_vel, 0, metal);
+  scene.Add(sphere);
+
+  // Small spherical light
+  Vec3 light_sphere_O = cam_pos + 0.5 * right + 1.5f * screen_top;
+  float light_sphere_rad = 0.6f;
+  Sphere light_sphere(light_sphere_O, light_sphere_rad, white_light);
+  scene.Add(light_sphere);
+
+  // Surrounding box - tint right side red, make top emit dim light
+  Vec3 box_O = sphere_O;
+  float box_side = 3.0f;
+  Box surrounding_box(box_O, right * box_side, forward * box_side,
+                      up * box_side);
+  surrounding_box.back.SetMaterial(metal);
+  surrounding_box.down.SetMaterial(metal);
+  surrounding_box.right.SetMaterial(red_metal);
+  surrounding_box.up.SetMaterial(dim_white_light);
+  surrounding_box.left.SetMaterial(metal);
+  surrounding_box.front.SetMaterial(metal);
+  scene.Add(surrounding_box);
+
+  return scene;
+}
+
+// A square box moving right. Scene arguments allow customisation of speed and
+// material properties of the box. Arguments from the fifth onwards are
+// interpreted as data of absorption modes of the box.
+// Scene arguments: speed albedo diffuse specular fuzz amplitude_1 mean_1
+//  sigma_1 amplitude_2 mean_2 sigma_2 amplitude_3 ...
+Scene moving_box(int width, int height, arglist args = {}) {
+  // Standard box properties - customisable by scene arguments.
   float speed = 0.25f;
   float albedo = 0.8f;
   float diffuse = 0.0f;
   float specular = 1.0f;
   float fuzz = 0.2;
-  Spectrum absorption = kBlack;
+  Spectrum absorption = Spectrum::Black;
 
+  // Read in scene arguments provided
   if (args.size() > 0) {
     speed = std::stof(args[0]);
   }
@@ -270,6 +142,7 @@ Scene moving_box(int width, int height, arglist args = {}) {
     fuzz = std::stof(args[4]);
   }
   if (args.size() > 5) {
+    // Read in absorption modes
     int i = 5;
     while (i + 2 < args.size()) {
       float amplitude = std::stof(args[i]);
@@ -282,14 +155,13 @@ Scene moving_box(int width, int height, arglist args = {}) {
                 << "starting with" << args[i] << std::endl;
     }
   }
-
   std::cout << "Setting up moving box with "
             << "speed " << speed << " "
             << "albedo " << albedo << " "
             << "diffuse " << diffuse << " "
             << "specular " << specular << " "
             << "fuzz " << fuzz << std::endl;
-  if (absorption.getModes().size() <= 5) {
+  if (absorption.size() < 1) {
     std::cout << "and no absorption." << std::endl;
   } else {
     std::cout << "and absorption modes " << std::endl;
@@ -299,106 +171,52 @@ Scene moving_box(int width, int height, arglist args = {}) {
     }
   }
 
+  // Finished reading in scene arguments. Begin setting up scene.
   Scene scene;
-
-  // auxiliary
-  Vec3 forward = z;
-  Vec3 right = x;
-  Vec3 up = Cross(right, forward);
-  Vec3 backward = -forward;
-  Vec3 left = -right;
-  Vec3 down = -up;
-
-  scene.SetAmbientBackground(kWhite * 0.01);
+  scene.SetAmbientBackground(Spectrum::White * 0.01);
 
   // Materials
-  Material clean_metal = Metal(0.8f, kBlack);
+  Material clean_metal = Material::Metal(0.8f);
   Material box_material = Material(albedo, diffuse, specular, fuzz, absorption);
 
-  // Add objects
-  // Vec3 sphere_vel = 0.9 * right;
+  // Box
   Vec3 box_vel = speed * right;
   Vec3 box_O = 3 * forward;
   float box_side = 0.5f;
-
   Box box(box_O, right * box_side, forward * box_side, up * box_side, box_vel,
           0, box_material);
   scene.Add(box);
 
+  // Flat plane
   Vec3 plane_O = box_O + down * 3 * box_side / 2.0f;
   Vec3 plane_a = right;
   Vec3 plane_b = forward;
   Plane plane(plane_O, plane_a, plane_b, clean_metal);
   scene.Add(plane);
 
+  // Camera
   Vec3 cam_pos = 3 * box_side * up;
   Camera cam(cam_pos, (box_O - cam_pos).NormalizedNonzero(), right, width,
              height);
-  scene.AddCamera(cam);
+  scene.Add(cam);
 
   return scene;
 }
 
-Scene mirror_box(int width, int height, arglist args = {}) {
-  Scene scene;
-
-  // Camera
-  Vec3 cam_pos = kZero3;
-  Vec3 forward = -z;
-  Vec3 right = x;
-  Vec3 up = Cross(right, forward);
-  Vec3 backward = -forward;
-  Vec3 left = -right;
-  Vec3 down = -up;
-
-  Camera cam(cam_pos, forward, right, width, height);
-  scene.AddCamera(cam);
-
-  Material white_light = Light();
-  Material dim_white_light = Light(kWhite * 0.05);
-  Material metal = Metal(0.8f);
-  Material red_metal = Metal(0.8f, Spectrum(GaussianData(1.0f, 500, 80)));
-  Material glass = kGlass;
-
-  // Auxiliary screen & direction variables
-  float aspect = static_cast<float>(width) / height;
-  Vec3 screen_top = (right ^ forward) / aspect;
-
-  // Add objects
-  Vec3 sphere_vel(0, 0, 0);
-  Vec3 sphere_O = 2 * forward;
-  float sphere_rad = 1.0f;
-  Sphere sphere(sphere_O, sphere_rad, sphere_vel, 0, metal);
-  scene.Add(sphere);
-
-  Vec3 light_sphere_O = cam_pos + 0.5 * right + 1.5f * screen_top;
-  float light_sphere_rad = 0.6f;
-  Sphere light_sphere(light_sphere_O, light_sphere_rad, white_light);
-  scene.Add(light_sphere);
-
-  Vec3 box_O = sphere_O;
-  float box_side = 3.0f;
-  Box surrounding_box(box_O, right * box_side, forward * box_side,
-                      up * box_side);
-  surrounding_box.back.SetMaterial(metal);
-  surrounding_box.down.SetMaterial(metal);
-  surrounding_box.right.SetMaterial(red_metal);
-  surrounding_box.up.SetMaterial(dim_white_light);
-  surrounding_box.left.SetMaterial(metal);
-  surrounding_box.front.SetMaterial(metal);
-  scene.Add(surrounding_box);
-
-  std::cout << "Scene created." << std::endl << std::flush;
-
-  return scene;
-}
-
+// A row of boxes moving up/down at varying speeds above a mirror.
+// Fast-moving boxes are very distorted. The images in the mirror are
+// time-delayed because of longer light travel time.
+// The number of boxes and min/max speeds are customizable. Providing the flag
+// "bg" in the 4th position activates a vertical background plane.
+// Scene arguments: nr_boxes min_speed max_speed bg
 Scene boxes_in_mirror(int width, int height, arglist args = {}) {
+  // Standard scene properties
   int nr_boxes = 5;
   float min_speed = -0.5f;
   float max_speed = 0.5f;
   bool bg_activated = false;
 
+  // Read in scene arguments provided
   int nargs = args.size();
   if (nargs > 0) {
     nr_boxes = std::stoi(args[0]);
@@ -413,29 +231,22 @@ Scene boxes_in_mirror(int width, int height, arglist args = {}) {
     bg_activated = true;
   }
 
-  float d_speed = (max_speed - min_speed) / (nr_boxes - 1);
-
-  float side = 1.0f;            // sidelength of boxes
-  float spacing = 0.5f * side;  // spacing between boxes
-
-  Material box_material = Material(0.5);
-
-  Vec3 up(0, 1, 0);
-  Vec3 right(1, 0, 0);
-  Vec3 forward = Cross(up, right);
-  Vec3 down = -up;
-  Vec3 left = -right;
-  Vec3 backward = -forward;
-
+  // Finished reading scene args. Set up scene.
   Scene scene;
-  scene.SetAmbientBackground(kWhite);
+  scene.SetAmbientBackground(Spectrum::White);
 
+  // Camera data
   Vec3 cam_pos = kZero3;
   Vec3 cam_to_screen = forward + 0.2 * down;
   float angle = 60 * kPi / 180;  // vertical screen angle
   float screen_height = 2 * cam_to_screen.Norm() * tanf(angle / 2);
   float screen_width = width * screen_height / height;
 
+  // Box data
+  float d_speed = (max_speed - min_speed) / (nr_boxes - 1);
+  float side = 1.0f;            // sidelength of boxes
+  float spacing = 0.5f * side;  // spacing between boxes
+  Material box_material = Material(0.5);
   float distance_to_cam =
       nr_boxes * (side + spacing) * width / (2.f * tanf(angle / 2.f) * height);
   Vec3 delta_centre = (side + spacing) * right;
@@ -445,8 +256,8 @@ Scene boxes_in_mirror(int width, int height, arglist args = {}) {
   Vec3 c2b = side / 2.f * forward;
   Vec3 c2u = side / 2.f * up;
 
-  // arrange boxes such that at t=0, they are all aligned in the middle row
-  // of the screen
+  // Set up boxes. Arrange them such that at t=0, their centers are all aligned
+  // in the middle row of the screen.
   for (int box_index = 0; box_index < nr_boxes; box_index++) {
     float speed = min_speed + box_index * d_speed;
     Vec3 centre = leftmost_centre + delta_centre * box_index;
@@ -456,15 +267,18 @@ Scene boxes_in_mirror(int width, int height, arglist args = {}) {
     scene.Add(box);
   }
 
+  // Add camera
   Camera cam(cam_pos, cam_to_screen, screen_width / 2.f * right, width, height);
-  scene.AddCamera(cam);
+  scene.Add(cam);
 
-  Material mirror_material = Metal(0.8f);
+  // Add ground mirror plane
+  Material mirror_material = Material::Metal(0.8f);
   float mirror_distance_to_cam = 2 * side;
   Plane mirror(cam_pos + mirror_distance_to_cam * down, right, forward,
                mirror_material);
   scene.Add(mirror);
 
+  // Add vertical background plane (if activated)
   if (bg_activated) {
     Material bg_material = Material(0.01f, 0.8f, 0.2f);
     float bg_distance_to_cam = distance_to_cam + side * 0.7f;
@@ -477,11 +291,15 @@ Scene boxes_in_mirror(int width, int height, arglist args = {}) {
   return scene;
 }
 
+// Three identical spheres emitting green light are placed in front of a mirror.
+// The top/bottom sphere is moving towards/away from the camera and away/towards
+// the mirror. This scene shows the Doppler shift and time delay due to light
+// travel times. Specifying scene arguments allows changing the number of
+// spheres as well as the magnitude of the speeds.
+// Scene arguments: nr_spheres max_speed
 Scene glowing_spheres(int width, int height, arglist args = {}) {
-  /*
-    MOVING SPHERE
-  */
-  float max_speed = 0.25f;  // standard value
+  // Standard scene arguments
+  float max_speed = 0.25f;
   int nr_spheres = 3;
   if (args.size() > 0) {
     max_speed = std::stof(args[0]);
@@ -490,32 +308,29 @@ Scene glowing_spheres(int width, int height, arglist args = {}) {
     nr_spheres = std::stoi(args[1]);
   }
 
+  // Finished reading in scene arguments. Set up scene.
   Scene scene;
+  scene.SetAmbientBackground(Spectrum::White * 0.01);
 
   // Camera
   Vec3 cam_pos = kZero3;
-  Vec3 forward = -z;
-  Vec3 right = x;
-  Vec3 up = Cross(right, forward);
-  Vec3 backward = -forward;
-  Vec3 left = -right;
-  Vec3 down = -up;
-
   Camera cam(cam_pos, forward, right, width, height);
-  scene.AddCamera(cam);
+  scene.Add(cam);
 
   // Materials
-  Material mirror = Metal(0.6);
-  Material white_light = Metal().SetProperty("emission", kWhite);
-  Spectrum green = Spectrum(GaussianData(0.5f, 530, 20));
-  Material green_glowing = Metal(0.0f).SetProperty("emission", green);
+  Material tinted_mirror = Material::Metal(0.6);
+  Material white_light =
+      Material::Metal().SetProperty("emission", Spectrum::White);
+  Spectrum green = Spectrum(Gaussian(0.5f, 530, 20));
+  Material green_glowing = Material::Metal(0.0f).SetProperty("emission", green);
 
+  // Sphere and mirror data
   float sphere_distance = 3.5f;
   float offset_angle = 15 * kPi / 180;
   float mirror_distance = sphere_distance * 1.9f;
   float mirror_angle = offset_angle * 2;
 
-  // Add objects
+  // Add spheres
   float sphere_rad = 0.7f;
   float spacing = sphere_rad;
   Vec3 delta_centre = (2.0 * sphere_rad + spacing) * down;
@@ -534,74 +349,73 @@ Scene glowing_spheres(int width, int height, arglist args = {}) {
     scene.Add(sphere);
   }
 
+  // Add tinted mirror
   Vec3 mirror_O = cam_pos + forward * mirror_distance;
   Vec3 mirror_A = (right * cosf(mirror_angle) + forward * sinf(mirror_angle)) *
                   4 * sphere_rad;
   Vec3 mirror_B = up * nr_spheres * (2 * sphere_rad + spacing) / 2.f;
-  Parallelogram mirror_plane(mirror_O - mirror_A / 2.0f, mirror_A, mirror_B,
-                             mirror);
-  scene.Add(mirror_plane);
-
-  scene.SetAmbientBackground(kWhite * 0.01);
+  Parallelogram mirror(mirror_O - mirror_A / 2.0f, mirror_A, mirror_B,
+                       tinted_mirror);
+  scene.Add(mirror);
 
   return scene;
 }
 
-// Stack boxes underneath each other, with increasing speed to the left, going
-// from bottom to top.
+// Seven boxes arranged vertically are moving sideways with differing speeds.
+// The box material has a single absorption mode in the short wavelength range
+// (amplitude: 1, mean: 400nm, std: 50nm). The scene shows the effect of the
+// Doppler shift on such an absorption mode. The absorption properties
+// may be changed by specifying absorption mode data as scene arguments.
+// Scene arguments: amplitude_1 mean_1 sigma_1 amplitude_2 ...
 Scene box_array(int width, int height, arglist args = {}) {
-  int nr_boxes = 7;
-  float min_speed = -0.7f;
-  float max_speed = 0.7f;
-  // float d_speed = 0.1f;
-  float d_speed = (max_speed - min_speed) / (nr_boxes - 1);
+  Spectrum box_absorption(Gaussian(1.0f, 400, 50));  // standard absorption
 
-  float side = 1.0f;            // sidelength of boxes
-  float spacing = 1.5f * side;  // spacing between boxes
-
-  Spectrum absorb_short(GaussianData(1.0f, 400, 50));
-
+  // Read in scene arguments
   int n_args = args.size();
   if (n_args > 0) {
-    Spectrum new_absorb = kBlack;
+    Spectrum new_absorb = Spectrum::Black;
     int i = 0;
     while (i + 2 < n_args) {
       float amp = std::stof(args[i]);
       float mean = std::stof(args[i + 1]);
       float sig = std::stof(args[i + 2]);
-      new_absorb += GaussianData(amp, mean, sig);
+      new_absorb += Gaussian(amp, mean, sig);
       i += 3;
     }
-
     if (i < n_args) {
       std::cout << "Ignoring remaining arguments, "
                 << "starting at " << args[i] << std::endl;
     }
-    absorb_short = new_absorb;
+    box_absorption = new_absorb;
   }
 
-  Material box_material = Metal(0.8f);  // let this be changed by arguments?
-  box_material.SetProperty("absorption", absorb_short);
+  // Create box material with chosen absorption properties.
+  Material box_material =
+      Material::Metal(0.8f);  // let this be changed by arguments?
+  box_material.SetProperty("absorption", box_absorption);
 
-  Vec3 up(0, 1, 0);
-  Vec3 right(1, 0, 0);
-  Vec3 forward = Cross(up, right);
-  Vec3 down = -up;
-  Vec3 left = -right;
-  Vec3 backward = -forward;
-
+  // Finished dealing with scene arguments. Set up scene.
   Scene scene;
-  scene.SetAmbientBackground(kWhite);
-  // scene.SetSkylight(kWhite, forward + down);
+  scene.SetAmbientBackground(Spectrum::White);
 
+  // Box data
+  int nr_boxes = 7;
+  float min_speed = -0.7f;
+  float max_speed = 0.7f;
+  float d_speed = (max_speed - min_speed) / (nr_boxes - 1);
+  float side = 1.0f;            // sidelength of boxes
+  float spacing = 1.5f * side;  // spacing between boxes
+
+  // Camera
   Vec3 cam_pos = kZero3;
   Vec3 cam_to_screen = forward;
   float angle = 60 * kPi / 180;  // vertical screen angle
   float screen_height = 2 * cam_to_screen.Norm() * tanf(angle / 2);
   float screen_width = width * screen_height / height;
   Camera cam(cam_pos, cam_to_screen, screen_width / 2.f * right, width, height);
-  scene.AddCamera(cam);
+  scene.Add(cam);
 
+  // Compute box data
   float distance_to_cam =
       nr_boxes * (side + spacing) / (2.f * tanf(angle / 2.f));
   Vec3 lowest_centre = (side + spacing) * (nr_boxes - 1) / 2.f * down +
@@ -611,98 +425,81 @@ Scene box_array(int width, int height, arglist args = {}) {
   Vec3 c2b = side / 2.f * forward;
   Vec3 c2u = side / 2.f * up;
 
-  // arrange boxes such that at t=0, they are all aligned in the middle column
-  // of the screen
+  // Add boxes. Arrange them such that at t=0, their centers are all aligned
+  // in the central column of the screen.
   for (int box_index = 0; box_index < nr_boxes; box_index++) {
     float speed = min_speed + box_index * d_speed;
-    Vec3 centre = lowest_centre + delta_centre * box_index;
-    // travel time for a lightray to get from the box centre to the camera
-    float time_offset = (cam_pos - centre).Norm();
-    Box box(centre, c2r, c2b, c2u, speed * right, -time_offset, box_material);
+    Vec3 center = lowest_centre + delta_centre * box_index;
+    // travel time for a lightray to get from the box center to the camera
+    float time_offset = (cam_pos - center).Norm();
+    Box box(center, c2r, c2b, c2u, speed * right, -time_offset, box_material);
     scene.Add(box);
   }
 
+  // Add vertical background plane behind the boxes.
   float plane_distance_to_cam = 2 * distance_to_cam;
   Plane plane(
       cam_pos + plane_distance_to_cam * cam_to_screen.NormalizedNonzero(),
-      right, up, Metal(0.1, kBlack, 0.8f));
+      right, up, Material::Metal(0.1, Spectrum::Black, 0.8f));
   scene.Add(plane);
 
   return scene;
 }
 
-// Put boxes of varying refractive constant in the frame.
-// Then move a ball across behind it - you should see the resulting time delay.
+// Two identical balls travel downwards at the same speed. The view towards
+// the left ball is obstructed by a glass box (top) and a diamond box (bottom).
+// This scene shows the time delay resulting from slower light travel time in
+// dielectric media, as well as the Doppler effect, visible especially for the
+// reflections of the balls in the sides of the boxes. Tjhe speed of the boxes
+// can be changed by specifying it as a scene argument.
+// Scene arguments: ball_speed
 Scene dielectric_delays(int width, int height, arglist args = {}) {
-  Scene scene;
-
   float ball_speed = 0.25f;
   if (args.size() > 0) {
     ball_speed = std::stof(args[0]);
   }
 
-  Vec3 up(0, 1, 0);
-  Vec3 right(1, 0, 0);
-  Vec3 forward = Cross(up, right);
-  Vec3 down = -up;
-  Vec3 left = -right;
-  Vec3 backward = -forward;
+  // Finished reading in scene argument. Set up scene.
+  Scene scene;
+  scene.SetSkylight(Spectrum::White * 0.05,
+                    (down + forward + left).NormalizedNonzero());
+  scene.SetAmbientBackground(Spectrum::White * 0.1);
 
+  // Materials
+  Material glass = Material::Glass;
+  Material diamond = Material::Diamond;
+
+  // Camera
   float horizontal_fov = 60 * kPi / 180;
   float half_fov = horizontal_fov / 2;
   float quarter_fov = half_fov / 2;
-
   Camera cam(kZero3, forward, right * tanf(half_fov), width, height);
-  scene.AddCamera(cam);
+  scene.Add(cam);
 
-  scene.SetSkylight(kWhite * 0.05, (down + forward + left).NormalizedNonzero());
-  scene.SetAmbientBackground(kWhite * 0.1);
-
+  // Add boxes
   float box_height = 1.0f;
   float box_width = 1.0f;
   float box_depth = 1.0f;
   float spacing = 0.5f;
-
   float mid_distance = 3.0f + box_depth / 2;
   Vec3 mid_left = mid_distance * (forward + tanf(quarter_fov) * left);
-
   Vec3 g_center = mid_left + up * (box_height + spacing) / 2;
   Vec3 d_center = mid_left + down * (box_height + spacing) / 2;
-
-  Material glass = kGlass;
-  Material diamond = kDiamond;
-  // glass.SetProperty("albedo", 0.95f);
-  // diamond.SetProperty("albedo", 0.95f);
-
-  /* Align central box axis with line to camera
-  Vec3 c2r =
-      (cosf(quarter_fov) * right + sinf(quarter_fov) * forward) * box_width / 2;
-
-  Vec3 g_c2b = g_center.NormalizedNonzero() * box_depth / 2;
-  Vec3 d_c2b = d_center.NormalizedNonzero() * box_depth / 2;
-
-  Vec3 g_c2u = Cross(c2r, g_c2b).NormalizedNonzero() * box_height / 2;
-  Vec3 d_c2u = Cross(c2r, d_c2b).NormalizedNonzero() * box_height / 2;
-
-  Box glass_box(g_center, c2r, g_c2b, g_c2u, glass);
-  Box diamond_box(d_center, c2r, d_c2b, d_c2u, diamond);
-  */
-
   Vec3 c2r = right * box_width / 2;
   Vec3 c2b = forward * box_depth / 2;
   Vec3 c2u = up * box_height / 2;
-
   Box glass_box(g_center, c2r, c2b, c2u, glass);
   Box diamond_box(d_center, c2r, c2b, c2u, diamond);
   scene.Add(glass_box);
   scene.Add(diamond_box);
 
+  // Add travelling balls
   float far_distance = mid_distance + box_depth;
   Vec3 far_left = far_distance * (forward + tanf(quarter_fov) * left);
   Vec3 far_right = far_distance * (forward + tanf(quarter_fov) * right);
   Vec3 ball_vel = ball_speed * down;
   float ball_rad = 0.2 * box_height;
-  Material blue_emitter = Light(Spectrum(GaussianData(1.0f, 400, 50)));
+  Material blue_emitter = Material::Light(Spectrum(Gaussian(1.0f, 400, 50)));
   Sphere left_ball(far_left, ball_rad, ball_vel, 0.0f, blue_emitter);
   Sphere right_ball(far_right, ball_rad, ball_vel, 0.0f, blue_emitter);
   scene.Add(left_ball);
@@ -711,48 +508,48 @@ Scene dielectric_delays(int width, int height, arglist args = {}) {
   return scene;
 }
 
-// Put two emitting panels on the left & right, one red, one green.
-// Have three diffuse balls move between them at different speeds.
+// Headlight absorption effect inside cube. Three identical, diffusely
+// reflecting, white balls are placed inside a box. The top ball moves right,
+// the bottom ball to the light, the middle ball is stationary. The left/right
+// panel of the box emits red/green light. This scene shows the headlight effect
+// for absorption. The speed of the moving boxes can be changed via a scene
+// argument.
+// Scene arguments: speed
 Scene headlight_absorption(int width, int height, arglist args = {}) {
-  Scene scene;
-
   float speed = 0.4f;
   if (args.size() > 0) {
     speed = std::stof(args[0]);
   }
 
-  Vec3 up(0, 1, 0);
-  Vec3 right(1, 0, 0);
-  Vec3 forward = Cross(up, right);
-  Vec3 down = -up;
-  Vec3 left = -right;
-  Vec3 backward = -forward;
+  // Finished reading in scene argument. Set up scene.
+  Scene scene;
 
+  // Camera
   Vec3 cam_pos(kZero3);
   float horz_fov = 100 * kPi / 180;
   float half_fov = horz_fov / 2;
   Camera cam(cam_pos, forward, right * tanf(half_fov), width, height);
-  scene.AddCamera(cam);
+  scene.Add(cam);
 
-  // Add surrounding box, set side panels to lights
+  // Add surrounding box, replace side panels material with lights.
+  // The remaining four panels are set to a fuzzy metal.
   float box_side = 5.0f;
   float half_side = box_side / 2;
   Vec3 box_O = cam_pos + forward * box_side * 0.4f;
-  Box box(box_O, right * half_side,
-          forward * half_side, up * half_side, Metal(0.5f, kBlack, 0.5f));
-
-  box.right.SetMaterial(Light(Spectrum(GaussianData(1.0f, 625, 25))));
-  box.left.SetMaterial(Light(Spectrum(GaussianData(1.0f, 525, 25))));
+  Box box(box_O, right * half_side, forward * half_side, up * half_side,
+          Material::Metal(0.5f, Spectrum::Black, 0.5f));
+  box.right.SetMaterial(Material::Light(Spectrum(Gaussian(1.0f, 625, 25))));
+  box.left.SetMaterial(Material::Light(Spectrum(Gaussian(1.0f, 525, 25))));
   scene.Add(box);
 
-  // Add moving balls
+  // Add three balls
   float ball_rad = box_side / 10.f;
   Material lambertian(0.95f);
   Vec3 mid_ball_pos = box_O + forward * box_side / 4;
   Vec3 top_ball_pos = mid_ball_pos + up * 3 * ball_rad;
   Vec3 bot_ball_pos = mid_ball_pos + down * 3 * ball_rad;
   Sphere mid_ball(mid_ball_pos, ball_rad, lambertian);
-  float time_delay = (top_ball_pos - cam_pos).Norm() + 2*ball_rad;
+  float time_delay = (top_ball_pos - cam_pos).Norm() + 2 * ball_rad;
   Sphere top_ball(top_ball_pos, ball_rad, speed * right, -time_delay,
                   lambertian);
   Sphere bot_ball(bot_ball_pos, ball_rad, speed * left, -time_delay,
@@ -760,6 +557,13 @@ Scene headlight_absorption(int width, int height, arglist args = {}) {
   scene.Add(top_ball);
   scene.Add(mid_ball);
   scene.Add(bot_ball);
+
+  return scene;
+}
+
+// An empty custom scene.
+Scene custom_scene(int width, int height, arglist args = {}) {
+  Scene scene;
 
   return scene;
 }
@@ -772,13 +576,14 @@ const std::map<std::string, Scene (*)(int, int, arglist)> scene_map = {
     {"box_array", &box_array},
     {"mirror_box", &mirror_box},
     {"dielectric_delays", &dielectric_delays},
-    {"headlight_absorption", &headlight_absorption}};
+    {"headlight_absorption", &headlight_absorption},
+    {"custom_scene", &custom_scene}};
 
 int main(int argc, char *argv[]) {
   // Start with standard arguments, then parse command line args.
   cmd_line_args args;
   if (argc > 1) {
-    bool parsed = parse_arguments(argc, argv, args);
+    bool parsed = args.parse_arguments(argc, argv);
     if (!parsed) {
       std::cout << "Error parsing cmd line arguments. Terminating."
                 << std::endl;
@@ -787,7 +592,7 @@ int main(int argc, char *argv[]) {
     std::cout << "Successfully parsed cmd line arguments." << std::endl;
   }
 
-  // DEAL with tests if specified
+  // Do tests if specified
   if (args.test) {
     Tester test;
     bool success = false;
