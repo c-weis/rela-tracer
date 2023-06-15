@@ -111,98 +111,6 @@ Scene mirror_box(int width, int height, arglist args = {}) {
   return scene;
 }
 
-// A square box moving right. Scene arguments allow customisation of speed and
-// material properties of the box. Arguments from the fifth onwards are
-// interpreted as data of absorption modes of the box.
-// Scene arguments: speed albedo diffuse specular fuzz amplitude_1 mean_1
-//  sigma_1 amplitude_2 mean_2 sigma_2 amplitude_3 ...
-Scene moving_box(int width, int height, arglist args = {}) {
-  // Standard box properties - customisable by scene arguments.
-  float speed = 0.25f;
-  float albedo = 0.8f;
-  float diffuse = 0.0f;
-  float specular = 1.0f;
-  float fuzz = 0.2;
-  Spectrum absorption = Spectrum::Black;
-
-  // Read in scene arguments provided
-  if (args.size() > 0) {
-    speed = std::stof(args[0]);
-  }
-  if (args.size() > 1) {
-    albedo = std::stof(args[1]);
-  }
-  if (args.size() > 2) {
-    diffuse = std::stof(args[2]);
-  }
-  if (args.size() > 3) {
-    specular = std::stof(args[3]);
-  }
-  if (args.size() > 4) {
-    fuzz = std::stof(args[4]);
-  }
-  if (args.size() > 5) {
-    // Read in absorption modes
-    int i = 5;
-    while (i + 2 < args.size()) {
-      float amplitude = std::stof(args[i]);
-      float lambda = std::stof(args[i + 1]);
-      float sigma = std::stof(args[i + 2]);
-      i += 3;
-    }
-    if (i < args.size()) {
-      std::cout << "Ignoring remaining scene arguments, "
-                << "starting with" << args[i] << std::endl;
-    }
-  }
-  std::cout << "Setting up moving box with "
-            << "speed " << speed << " "
-            << "albedo " << albedo << " "
-            << "diffuse " << diffuse << " "
-            << "specular " << specular << " "
-            << "fuzz " << fuzz << std::endl;
-  if (absorption.size() < 1) {
-    std::cout << "and no absorption." << std::endl;
-  } else {
-    std::cout << "and absorption modes " << std::endl;
-    for (auto mode : absorption.getModes()) {
-      std::cout << "(" << mode.amplitude << ", " << mode.mean << ", "
-                << mode.sig << ")" << std::endl;
-    }
-  }
-
-  // Finished reading in scene arguments. Begin setting up scene.
-  Scene scene;
-  scene.SetAmbientBackground(Spectrum::White * 0.01);
-
-  // Materials
-  Material clean_metal = Material::Metal(0.8f);
-  Material box_material = Material(albedo, diffuse, specular, fuzz, absorption);
-
-  // Box
-  Vec3 box_vel = speed * right;
-  Vec3 box_O = 3 * forward;
-  float box_side = 0.5f;
-  Box box(box_O, right * box_side, forward * box_side, up * box_side, box_vel,
-          0, box_material);
-  scene.Add(box);
-
-  // Flat plane
-  Vec3 plane_O = box_O + down * 3 * box_side / 2.0f;
-  Vec3 plane_a = right;
-  Vec3 plane_b = forward;
-  Plane plane(plane_O, plane_a, plane_b, clean_metal);
-  scene.Add(plane);
-
-  // Camera
-  Vec3 cam_pos = 3 * box_side * up;
-  Camera cam(cam_pos, (box_O - cam_pos).NormalizedNonzero(), right, width,
-             height);
-  scene.Add(cam);
-
-  return scene;
-}
-
 // A row of boxes moving up/down at varying speeds above a mirror.
 // Fast-moving boxes are very distorted. The images in the mirror are
 // time-delayed because of longer light travel time.
@@ -570,7 +478,6 @@ Scene custom_scene(int width, int height, arglist args = {}) {
 
 const std::map<std::string, Scene (*)(int, int, arglist)> scene_map = {
     {"glowing_spheres", &glowing_spheres},
-    {"moving_box", &moving_box},
     {"boxes_in_mirror", &boxes_in_mirror},
     {"metal_balls", &metal_balls},
     {"box_array", &box_array},
